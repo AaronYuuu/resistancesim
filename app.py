@@ -908,42 +908,45 @@ def main():
         features_df = pd.DataFrame([param_inference_features])
         
         if st.sidebar.button("🔍 Preview Resistance Prediction"):
-            with st.spinner("Running inference..."):
-                # Construct patient_data for resistance classifier
-                patient_data = {
-                    'tumor_burden': 1e6 * (1 + ctdna_vaf),
-                    'proliferation_rate': 0.05,
-                    'resistance_mechanism': 'Unknown',  # Will be predicted
-                    'baseline_vaf': ctdna_vaf,
+            try:
+                with st.spinner("Running inference..."):
+                    # Construct patient_data for resistance classifier
+                    patient_data = {
+                        'tumor_burden': 1e6 * (1 + ctdna_vaf),
+                        'proliferation_rate': 0.05,
+                        'resistance_mechanism': 'Unknown',  # Will be predicted
+                        'baseline_vaf': ctdna_vaf,
+                        
+                        'cd8_density': mdsc_count * 0.5,
+                        'cd8_activation': 0.5,
+                        'cd8_tumor_distance': crp_level / 2,
+                        
+                        'm2_tam_density': mdsc_count * 0.8,
+                        'm2_activation': 0.6,
+                        'mdsc_density': mdsc_count,
+                        'mdsc_suppression': min(il10_level / 10, 1.0),
+                        'mdsc_tumor_proximity': 80,
+                        
+                        'caf_density': tgfb_level * 5,
+                        'caf_activation': min(tgfb_level / 20, 1.0),
+                        'tgf_beta': tgfb_level,
+                        
+                        'vessel_density': 150,
+                        'vascular_permeability': 0.4,
+                        'vegf_level': vegf_level / 100,
+                        
+                        'hgf_level': hgf_level,
+                        'il10_level': il10_level / 10,
+                        
+                        '0_2_strength': 0.5,
+                        '3_1_strength': min(il10_level / 50, 1.0),
+                        '4_0_strength': min(tgfb_level / 30, 1.0)
+                    }
                     
-                    'cd8_density': mdsc_count * 0.5,
-                    'cd8_activation': 0.5,
-                    'cd8_tumor_distance': crp_level / 2,
-                    
-                    'm2_tam_density': mdsc_count * 0.8,
-                    'm2_activation': 0.6,
-                    'mdsc_density': mdsc_count,
-                    'mdsc_suppression': min(il10_level / 10, 1.0),
-                    'mdsc_tumor_proximity': 80,
-                    
-                    'caf_density': tgfb_level * 5,
-                    'caf_activation': min(tgfb_level / 20, 1.0),
-                    'tgf_beta': tgfb_level,
-                    
-                    'vessel_density': 150,
-                    'vascular_permeability': 0.4,
-                    'vegf_level': vegf_level / 100,
-                    
-                    'hgf_level': hgf_level,
-                    'il10_level': il10_level / 10,
-                    
-                    '0_2_strength': 0.5,
-                    '3_1_strength': min(il10_level / 50, 1.0),
-                    '4_0_strength': min(tgfb_level / 30, 1.0)
-                }
-                
-                prediction = st.session_state.resistance_classifier.predict_from_patient_data(patient_data)
-                st.sidebar.success(f"Predicted: {prediction['predicted_mechanism']} ({prediction['confidence']:.1%})")
+                    prediction = st.session_state.resistance_classifier.predict_from_patient_data(patient_data)
+                    st.sidebar.success(f"Predicted: {prediction['predicted_mechanism']} ({prediction['confidence']:.1%})")
+            except Exception as e:
+                st.sidebar.error(f"Resistance prediction failed: {e}")
         
         params['use_ctdna_prediction'] = st.sidebar.checkbox("Enable ctDNA Prediction", value=True)
         
