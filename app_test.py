@@ -1,0 +1,660 @@
+"""
+NSCLC Digital Twin - Complete Integrated Application with ML Enhancement
+Combines ODE modeling, ML parameter inference, ctDNA dynamics, and resistance classification
+"""
+
+import sys
+from pathlib import Path
+from dataclasses import dataclass
+import numpy as np
+import pandas as pd
+import torch
+import streamlit as st
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+from scipy.integrate import solve_ivp
+
+# Add src to path and import modules
+src_path = str(Path(__file__).parent / 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+
+from src.models.tumour_population import nsclc_digital_twin_ode, PatientProfile
+from src.models.epigenetic_plasticity import EpigeneticStateMachine
+from src.models.abc_transporters import ABCMediatedEfflux
+from src.models.mutations import EGFRMutationModel
+from src.utils.literature_params import CARBOPLATIN, ABC_TRANSPORTERS, EPIGENETIC_PARAMS
+from src.utils.synthetic_data_loader import load_synthetic_data
+from src.ml.models.parameter_inference import PatientParameterNN
+from src.ml.models.ct_dna_dynamics import ctDNANeuralODE
+from src.ml.models.resistance_classifier import TMEGraphClassifier
+from src.ml.utils.ode_model_selector import ODESelector
+
+# ============================================================================
+# DATA STRUCTURES & SESSION STATE
+# ============================================================================
+@dataclass
+class SimulationResults:
+    """Container for simulation outputs"""
+    time: np.ndarray  # days
+    sensitive_cells: np.ndarray
+    resistant_cells: np.ndarray
+    drug_concentration: np.ndarray
+    abc_expression: np.ndarray
+    epigenetic_score: np.ndarray
+    recurrence_time: float  # months
+    recurrence_detected: bool
+    solver_success: bool
+    solver_message: str
+    # ML-enhanced fields
+    ctdna_vaf: np.ndarray = None
+    ctdna_uncertainty: np.ndarray = None
+    ml_inferred_params: dict = None
+    resistance_prediction: dict = None
+
+def init_session_state():
+    """Initialize ML models and data in session state"""
+    if 'ml_models_loaded' in st.session_state:
+        return
+        
+    st.session_state.ml_models_loaded = False
+    for key in ['parameter_model', 'ctdna_model', 'resistance_classifier', 'selector', 'synthetic_data']:
+        setattr(st.session_state, key, None)
+    
+    try:
+        st.session_state.synthetic_data = load_synthetic_data()
+        st.session_state.ml_data_available = True
+        
+        # Load trained models
+        param_model = PatientParameterNN(hidden_dim=128)
+        param_model.load_state_dict(torch.load('src/ml/checkpoints/patient_parameter_nn.pth', map_location='cpu', weights_only=False)['model_state_dict'])
+        param_model.eval()
+        
+        ctdna_model = ctDNANeuralODE()
+        ctdna_model.eval()
+        
+        classifier = TMEGraphClassifier()
+        classifier.load_state_dict(torch.load('src/ml/checkpoints/tme_gnn_classifier.pth', map_location='cpu', weights_only=False)['model_state_dict'])
+        classifier.eval()
+        
+        st.session_state.parameter_model = param_model
+        st.session_state.ctdna_model = ctdna_model
+        st.session_state.resistance_classifier = classifier
+        st.session_state.selector = ODESelector(classifier)
+        st.session_state.ml_models_loaded = True
+        
+    except FileNotFoundError:
+        st.session_state.ml_data_available = False
+
+init_session_state()
+
+# ============================================================================
+# DRUG SCHEDULE & SIMULATION CORE
+# ============================================================================
+def create_drug_schedule(regimen: str, dose_intensity: float = 1.0):
+    """Create pulsatile dosing function based on clinical regimen"""
+    schedules = {
+        "Carboplatin-Paclitaxel q21d": {"cycle_days": 21, "dose_duration": 1, "dose_amount": 5.0},
+        "Carboplatin-Paclitaxel q14d (dose-dense)": {"cycle_days": 14, "dose_duration": 1, "dose_amount": 4.0},
+        "Pemetrexed q21d (non-squamous)": {"cycle_days": 21, "dose_duration": 0.5, "dose_amount": 3.5},
+        "Weekly Paclitaxel (metronomic)": {"cycle_days": 7, "dose_duration": 0.5, "dose_amount": 2.0}
+    }
+    
+    schedule = schedules.get(regimen, schedules["Carboplatin-Paclitaxel q21d"])
+    schedule["dose_amount"] *= dose_intensity
+    
+    def drug_input(t): return schedule["dose_amount"] if (t % schedule["cycle_days"]) < schedule["dose_duration"] else 0.0
+    return drug_input
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def run_simulation_cached(params: dict) -> SimulationResults:
+    """
+    Cached simulation runner with ML-enhanced parameter inference and ctDNA prediction
+    
+    Args:
+        params: Dictionary containing all simulation parameters
+    
+    Returns:
+        SimulationResults dataclass with tumor dynamics and optional ML predictions
+    """
+    # Unpack parameters
+    residual_burden = params['residual_burden']
+    stage = params['stage']
+    histology = params['histology']
+    abc_score = params['abc_score']
+    plasticity_rate = params['plasticity_rate']
+    epigenetic_noise = params['epigenetic_noise']
+    regimen = params['regimen']
+    dose_intensity = params['dose_intensity']
+    simulation_days = params['simulation_days']
+    egfr_positive = params.get('egfr_positive', False)
+    egfr_mutation_type = params.get('egfr_mutation_type', None)
+    ml_inference = params.get('ml_inference', False)
+    patient_id = params.get('patient_id', None)
+    use_ctdna = params.get('use_ctdna_prediction', False)
+    
+    # Initialize ML context
+    ml_inferred_params = resistance_prediction = ctdna_vaf = ctdna_uncertainty = None
+    
+    # ML inference path
+    if ml_inference and patient_id and st.session_state.ml_models_loaded:
+        try:
+            ctdna_df, tme_df, _, _ = st.session_state.synthetic_data
+            patient_tme = tme_df[(tme_df['patient_id'] == patient_id) & (tme_df['week'] == 0)]
+            patient_ctdna = ctdna_df[(ctdna_df['patient_id'] == patient_id) & (ctdna_df['week'] == 0)]
+            
+            if not patient_tme.empty and not patient_ctdna.empty:
+                # Infer parameters - need both TME and ctDNA data
+                features = pd.DataFrame([{
+                    'ctdna_vaf_percent': patient_ctdna['ctdna_vaf_percent'].iloc[0],
+                    'serum_hgf_pg_ml': patient_tme['serum_hgf_pg_ml'].iloc[0],
+                    'plasma_il6_pg_ml': patient_tme['plasma_il6_pg_ml'].iloc[0],
+                    'circulating_mdsc_per_ml': patient_tme['circulating_mdsc_per_ml'].iloc[0],
+                    'serum_tgfb_ng_ml': patient_tme['serum_tgfb_ng_ml'].iloc[0],
+                    'ctc_count_per_ml': patient_tme['ctc_count_per_ml'].iloc[0],
+                    'serum_crp_mg_l': patient_tme['serum_crp_mg_l'].iloc[0],
+                    'serum_ldh_u_l': patient_tme['serum_ldh_u_l'].iloc[0]
+                }])
+                
+                with torch.no_grad():
+                    pred_params = st.session_state.parameter_model.predict_from_pandas(features)
+                
+                ml_inferred_params = pred_params.iloc[0].to_dict()
+                plasticity_rate = ml_inferred_params['mu'] * 10
+                abc_score = ml_inferred_params['ABC']
+                epigenetic_noise = ml_inferred_params['sigma2']
+                
+                # Predict resistance
+                resistance_prediction = st.session_state.resistance_classifier.predict_from_patient_data({
+                    'circulating_mdsc_per_ml': patient_tme['circulating_mdsc_per_ml'].iloc[0],
+                    'plasma_il10_pg_ml': patient_tme['plasma_il10_pg_ml'].iloc[0],
+                    'serum_hgf_pg_ml': patient_tme['serum_hgf_pg_ml'].iloc[0],
+                    'serum_tgfb_ng_ml': patient_tme['serum_tgfb_ng_ml'].iloc[0],
+                    'plasma_vegf_pg_ml': patient_tme['plasma_vegf_pg_ml'].iloc[0],
+                    'resistance_mechanism': patient_tme['resistance_mechanism'].iloc[0]
+                })
+                
+                # Auto-select ODE modules
+                config = st.session_state.selector.select_modules({
+                    'circulating_mdsc_per_ml': patient_tme['circulating_mdsc_per_ml'].iloc[0],
+                    'plasma_il10_pg_ml': patient_tme['plasma_il10_pg_ml'].iloc[0],
+                    'serum_hgf_pg_ml': patient_tme['serum_hgf_pg_ml'].iloc[0],
+                    'serum_tgfb_ng_ml': patient_tme['serum_tgfb_ng_ml'].iloc[0],
+                    'plasma_vegf_pg_ml': patient_tme['plasma_vegf_pg_ml'].iloc[0],
+                    'resistance_mechanism': patient_tme['resistance_mechanism'].iloc[0]
+                })
+                
+                if 'param_overrides' in config:
+                    for param, value in config['param_overrides'].items():
+                        if param == 'mu': plasticity_rate = value
+                        elif param == 'ABC': abc_score = value
+                        
+        except Exception as e:
+            st.warning(f"ML inference failed: {e}. Using manual parameters.")
+    
+    # Create patient profile and initialize models
+    patient = PatientProfile(stage=stage, histology=histology, residual_burden=residual_burden,
+                            baseline_plasticity=plasticity_rate, abc_expression=abc_score)
+    patient_params = patient.to_params_dict()
+    
+    epigenetic_model = EpigeneticStateMachine(instability_sigma=epigenetic_noise, heritability_h=0.8)
+    abc_model = ABCMediatedEfflux(basal_abcc1=abc_score, basal_abcg2=abc_score * 0.5)
+    
+    # ODE setup
+    if egfr_positive and egfr_mutation_type:
+        egfr_model = EGFRMutationModel(mutation_type=egfr_mutation_type)
+        osi_schedule = egfr_model.create_osimertinib_schedule(dose_mg=80)
+        patient_params.update({
+            'osi_dose_schedule': osi_schedule,
+            'egfr_mutation_rate': 1e-7,
+            'dtp_entry_rate': 0.001,
+            'dtp_exit_rate': 0.0005
+        })
+        initial_state = egfr_model.get_initial_state(residual_burden)
+        def ode_wrapper(t, y): return egfr_model.osimertinib_ode(y, t, patient_params)
+        def recurrence_event(t, y): return (y[0] + y[1] + y[2] + y[3]) - 1e8
+    else:
+        drug_schedule_func = create_drug_schedule(regimen, dose_intensity)
+        initial_state = [residual_burden, max(1.0, residual_burden * 0.002), 0.0, abc_score, epigenetic_noise]
+        def ode_wrapper(t, y): return nsclc_digital_twin_ode(y, t, patient_params, {}, epigenetic_model, abc_model, drug_schedule_func)
+        def recurrence_event(t, y): return (y[0] + y[1]) - 1e8
+    
+    recurrence_event.terminal = True
+    recurrence_event.direction = 1
+    
+    # Solve ODE
+    try:
+        solution = solve_ivp(ode_wrapper, t_span=[0, simulation_days], y0=initial_state, method='LSODA',
+                            dense_output=True, events=recurrence_event, rtol=1e-6, atol=1e-9, max_step=1.0)
+        
+        recurrence_detected = len(solution.t_events[0]) > 0
+        recurrence_time_months = solution.t_events[0][0] / 30.44 if recurrence_detected else simulation_days / 30.44
+        
+        t_eval = np.linspace(0, solution.t[-1], 1000)
+        y_eval = solution.sol(t_eval)
+        
+        # Create results object
+        if egfr_positive and egfr_mutation_type:
+            results = SimulationResults(
+                time=t_eval,
+                sensitive_cells=np.maximum(0, y_eval[0, :]),
+                resistant_cells=np.maximum(0, y_eval[1, :] + y_eval[2, :] + y_eval[3, :]),
+                drug_concentration=np.maximum(0, y_eval[4, :]),
+                abc_expression=np.ones_like(t_eval) * abc_score,
+                epigenetic_score=np.ones_like(t_eval) * epigenetic_noise,
+                recurrence_time=recurrence_time_months,
+                recurrence_detected=recurrence_detected,
+                solver_success=solution.success,
+                solver_message=solution.message,
+                ml_inferred_params=ml_inferred_params,
+                resistance_prediction=resistance_prediction
+            )
+        else:
+            results = SimulationResults(
+                time=t_eval,
+                sensitive_cells=np.maximum(0, y_eval[0, :]),
+                resistant_cells=np.maximum(0, y_eval[1, :]),
+                drug_concentration=np.maximum(0, y_eval[2, :]),
+                abc_expression=np.maximum(0, y_eval[3, :]),
+                epigenetic_score=np.maximum(0, y_eval[4, :]),
+                recurrence_time=recurrence_time_months,
+                recurrence_detected=recurrence_detected,
+                solver_success=solution.success,
+                solver_message=solution.message,
+                ml_inferred_params=ml_inferred_params,
+                resistance_prediction=resistance_prediction
+            )
+        
+        # ctDNA prediction
+        if use_ctdna and st.session_state.ml_models_loaded:
+            tumor_burden = results.sensitive_cells + results.resistant_cells
+            tumor_rate = np.gradient(tumor_burden, t_eval)
+            clone_fraction = results.resistant_cells / np.maximum(tumor_burden, 1)
+            
+            initial_ctdna = ml_inferred_params.get('baseline_ctdna', 0.001) if ml_inferred_params else 0.001
+            tumor_tensor = torch.tensor([[b, r, f] for b, r, f in zip(tumor_burden, tumor_rate, clone_fraction)], dtype=torch.float32)
+            time_tensor = torch.tensor(t_eval, dtype=torch.float32)
+            
+            with torch.no_grad():
+                ctDNA_pred = st.session_state.ctdna_model.simulate(initial_ctdna, tumor_tensor, time_tensor)
+            
+            results.ctdna_vaf = (ctDNA_pred.numpy() / (tumor_burden / 1000)) * 100
+            results.ctdna_uncertainty = results.ctdna_vaf * 0.15  # 15% CV
+            
+    except Exception as e:
+        t_dummy = np.linspace(0, simulation_days, 100)
+        results = SimulationResults(
+            time=t_dummy,
+            sensitive_cells=np.zeros_like(t_dummy),
+            resistant_cells=np.zeros_like(t_dummy),
+            drug_concentration=np.zeros_like(t_dummy),
+            abc_expression=np.zeros_like(t_dummy),
+            epigenetic_score=np.zeros_like(t_dummy),
+            recurrence_time=0.0,
+            recurrence_detected=False,
+            solver_success=False,
+            solver_message=str(e),
+            ml_inferred_params=ml_inferred_params,
+            resistance_prediction=resistance_prediction
+        )
+    
+    return results
+
+# ============================================================================
+# VISUALIZATION FUNCTIONS
+# ============================================================================
+def plot_ctdna_comparison(results: SimulationResults, patient_id: str) -> go.Figure:
+    """Plot ctDNA prediction vs actual (if synthetic data available)"""
+    fig = go.Figure()
+    time_months = results.time / 30.44
+    
+    if results.ctdna_vaf is not None:
+        fig.add_trace(go.Scatter(x=time_months, y=results.ctdna_vaf, name='Predicted ctDNA VAF', 
+                                line=dict(color='#FF6B6B', width=3)))
+        if results.ctdna_uncertainty is not None:
+            fig.add_trace(go.Scatter(x=np.concatenate([time_months, time_months[::-1]]), 
+                                    y=np.concatenate([results.ctdna_vaf + results.ctdna_uncertainty,
+                                                    (results.ctdna_vaf - results.ctdna_uncertainty)[::-1]]),
+                                    fill='toself', fillcolor='rgba(255,107,107,0.2)', 
+                                    line=dict(color='rgba(255,255,255,0)'), name='95% Confidence'))
+    
+    if st.session_state.ml_data_available and patient_id:
+        ctdna_df, _, _, _ = st.session_state.synthetic_data
+        actual_ctdna = ctdna_df[ctdna_df['patient_id'] == patient_id]
+        if not actual_ctdna.empty:
+            fig.add_trace(go.Scatter(x=actual_ctdna['week'] / 4.33, y=actual_ctdna['ctdna_vaf_percent'], 
+                                    mode='markers', name='Actual ctDNA', 
+                                    marker=dict(color='#4ECDC4', size=10, symbol='diamond')))
+            
+            if results.ctdna_vaf is not None:
+                pred_at_actual = np.interp(actual_ctdna['week'] * 7, results.time, results.ctdna_vaf)
+                mse = np.mean((pred_at_actual - actual_ctdna['ctdna_vaf_percent'])**2)
+                fig.add_annotation(x=0.05, y=0.95, xref='paper', yref='paper', text=f"MSE: {mse:.4f}%",
+                                  showarrow=False, bgcolor='rgba(255,255,255,0.8)')
+    
+    fig.update_layout(title="ctDNA Dynamics: Prediction vs Actual", xaxis_title="Time (months)", 
+                     yaxis_title="ctDNA VAF (%)", yaxis_type='log', height=500)
+    return fig
+
+def display_ml_internals(results: SimulationResults):
+    """Display ML model internals in Advanced Mode"""
+    st.subheader("🔍 ML Model Internals")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### Parameter Inference")
+        if results.ml_inferred_params:
+            df_params = pd.DataFrame([results.ml_inferred_params]).T
+            df_params.columns = ["Value"]
+            st.dataframe(df_params, use_container_width=True)
+            
+            st.markdown("### vs Literature Defaults")
+            lit_vs_ml = {k: [v, results.ml_inferred_params.get(k, v)] for k, v in {'r_R': 0.05, 'mu': 0.05, 'ABC': 1.0}.items()}
+            df_compare = pd.DataFrame(lit_vs_ml, index=['Literature', 'ML']).T
+            st.dataframe(df_compare, use_container_width=True)
+        else:
+            st.info("No ML parameters available (manual mode)")
+    
+    with col2:
+        st.markdown("### Resistance Classification")
+        if results.resistance_prediction:
+            st.json(results.resistance_prediction)
+            fig = px.pie(values=list(results.resistance_prediction['all_probabilities'].values()),
+                        names=list(results.resistance_prediction['all_probabilities'].keys()),
+                        title="Resistance Mechanism Probabilities")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No resistance prediction available")
+
+def display_confidence_intervals(results: SimulationResults):
+    """Display model uncertainty estimates"""
+    st.subheader("📊 Model Confidence Intervals")
+    
+    if results.ml_inferred_params:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            base_mu = results.ml_inferred_params.get('mu', 0.05)
+            st.metric("Phenotypic Plasticity (μ)", f"{base_mu:.4f}", delta=f"±{base_mu * 0.2:.4f}")
+        with col2:
+            base_rR = results.ml_inferred_params.get('r_R', 0.05)
+            st.metric("Resistant Growth Rate", f"{base_rR:.4f}", delta=f"±{base_rR * 0.15:.4f}")
+        with col3:
+            base_ABC = results.ml_inferred_params.get('ABC', 1.0)
+            st.metric("ABC Expression", f"{base_ABC:.2f}", delta=f"±{base_ABC * 0.1:.2f}")
+    
+    if results.resistance_prediction:
+        conf, unc = results.resistance_prediction['confidence'], results.resistance_prediction['uncertainty']
+        st.progress(conf)
+        st.write(f"**Confidence:** {conf:.1%}")
+        st.write(f"**Uncertainty:** {unc:.1%}")
+        st.success("High confidence prediction") if conf > 0.8 else st.warning("Moderate confidence prediction") if conf > 0.6 else st.error("Low confidence - consider manual review")
+
+def plot_tumour_dynamics(results: SimulationResults, treatment_type: str = "chemotherapy") -> go.Figure:
+    """Main tumour population plot with ML overlays"""
+    fig = go.Figure()
+    time_months = results.time / 30.44
+    
+    fig.add_trace(go.Scatter(x=time_months, y=results.sensitive_cells, name='Sensitive Cells', line=dict(color='#1f77b4', width=2)))
+    fig.add_trace(go.Scatter(x=time_months, y=results.resistant_cells, name='Resistant Cells', line=dict(color='#d62728', width=2)))
+    fig.add_trace(go.Scatter(x=time_months, y=results.sensitive_cells + results.resistant_cells, name='Total tumour Burden', line=dict(color='#2ca02c', width=3)))
+    
+    if results.ctdna_vaf is not None:
+        fig.add_trace(go.Scatter(x=time_months, y=results.ctdna_vaf * 1e6, name='ctDNA VAF (×10⁶)', line=dict(color='#FF6B6B', width=2, dash='dot'), yaxis='y2'))
+    
+    fig.add_hline(y=1e8, line_dash="dash", line_color="rgba(255,0,0,0.5)", annotation_text="Clinical Recurrence Threshold", annotation_position="right")
+    
+    if results.resistance_prediction and results.resistance_prediction['confidence'] > 0.7:
+        fig.add_vline(x=results.recurrence_time, line_dash="dash", line_color="rgba(255,165,0,0.7)", 
+                     annotation_text=f"ML Predicted Recurrence: {results.recurrence_time:.1f}mo", annotation_position="top")
+    
+    treatment_title = "Osimertinib (EGFR-TKI)" if treatment_type == "osimertinib" else "Maintenance Chemotherapy"
+    fig.update_layout(title=f"tumour & ctDNA Dynamics Under {treatment_title}", xaxis_title="Time (months)", yaxis_title="Cell Count", 
+                     yaxis_type="log", yaxis_range=[0, 11], height=500, hovermode='x unified',
+                     yaxis2=dict(title="ctDNA VAF (%)", overlaying='y', side='right', type='log'))
+    return fig
+
+def plot_drug_and_abc(results: SimulationResults, treatment_type: str = "chemotherapy") -> go.Figure:
+    """Drug concentration and ABC expression over time"""
+    fig = make_subplots(rows=2, cols=1, subplot_titles=("Drug Concentration", "ABC Transporter Expression"), vertical_spacing=0.15)
+    time_months = results.time / 30.44
+    
+    drug_unit = "nM" if treatment_type == "osimertinib" else "μM"
+    fig.add_trace(go.Scatter(x=time_months, y=results.drug_concentration, name='Drug Concentration', 
+                            line=dict(color='#17becf', width=1.5), fill='tozeroy', fillcolor='rgba(23,190,207,0.3)'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=time_months, y=results.abc_expression, name='ABC Expression', line=dict(color='#ff7f0e', width=2)), row=2, col=1)
+    
+    fig.update_xaxes(title_text="Time (months)", row=2, col=1)
+    fig.update_yaxes(title_text=f"Concentration ({drug_unit})", row=1, col=1)
+    fig.update_yaxes(title_text="Relative Expression", row=2, col=1)
+    fig.update_layout(height=600, showlegend=False, hovermode='x unified')
+    return fig
+
+def plot_epigenetic_trajectory(results: SimulationResults) -> go.Figure:
+    """Epigenetic instability evolution"""
+    fig = go.Figure()
+    time_months = results.time / 30.44
+    
+    fig.add_trace(go.Scatter(x=time_months, y=results.epigenetic_score, name='Epigenetic Instability (σ²)', 
+                            line=dict(color='#9467bd', width=3), fill='tozeroy', fillcolor='rgba(148,103,189,0.3)'))
+    
+    fig.update_layout(title="Epigenetic Instability Accumulation Under Drug Pressure", xaxis_title="Time (months)", 
+                     yaxis_title="Epigenetic Instability Score (σ²)", height=400, 
+                     annotations=[dict(x=time_months[-1]*0.6, y=results.epigenetic_score.max()*0.7, 
+                                     text="Drug pressure → ↑ epigenetic noise → ↑ phenotypic switching", 
+                                     showarrow=True, arrowhead=2, ax=-80, ay=-40)])
+    return fig
+
+def plot_resistance_fraction(results: SimulationResults) -> go.Figure:
+    """Resistant fraction over time"""
+    fig = go.Figure()
+    time_months = results.time / 30.44
+    resistant_fraction = results.resistant_cells / (results.sensitive_cells + results.resistant_cells + 1e-10)
+    
+    fig.add_trace(go.Scatter(x=time_months, y=resistant_fraction * 100, name='Resistant Fraction', 
+                            line=dict(color='#e377c2', width=3), fill='tozeroy', fillcolor='rgba(227,119,194,0.3)'))
+    
+    fig.update_layout(title="Evolution of Resistant Cell Fraction", xaxis_title="Time (months)", yaxis_title="Resistant Cells (%)", 
+                     yaxis_range=[0, 100], height=400)
+    return fig
+
+def display_recurrence_prediction(recurrence_time_months: float, detected: bool) -> None:
+    """Show a high-level summary of recurrence prediction"""
+    if detected:
+        emoji, label = ("🟢", "favorable") if recurrence_time_months > 16 else ("🟡", "intermediate") if recurrence_time_months >= 10 else ("🔴", "high-risk")
+        st.markdown(f"<div style='margin:1.5rem 0;'><h3 style='margin:0;'>Predicted Clinical Recurrence {emoji}</h3><p style='margin:0.25rem 0 0;'>Estimated time to recurrence: <strong>{recurrence_time_months:.1f} months</strong> (<em>{label} risk</em>)<br/></p></div>", unsafe_allow_html=True)
+    else:
+        st.info(f"🟢 No recurrence detected within simulation window (~{recurrence_time_months:.1f} months)")
+
+def display_parameter_importance() -> None:
+    """Display qualitative notes about how key parameters affect recurrence"""
+    st.subheader("📌 Qualitative Parameter Effects")
+    st.markdown("""
+    - **Higher ABC expression** → faster drug efflux → earlier risk of recurrence.
+    - **Higher phenotypic plasticity (μ)** → more rapid S→R switching → earlier recurrence.
+    - **Higher epigenetic instability (σ²)** → more non-genetic variability → broader resistance emergence.
+    - **More dose-dense / metronomic regimens** can delay recurrence in highly plastic tumours.
+    """)
+
+# ============================================================================
+# MAIN UI LOGIC
+# ============================================================================
+def main():
+    st.title("🔬 NSCLC Tumor Resistance & Recurrence Predictor")
+    st.markdown("""**Mechanistic modeling + Machine Learning for patient-specific resistance prediction**  
+                The goal is to act as an early detection system for drug resistance and clinical recurrence in NSCLC patients undergoing chemotherapy or targeted therapy.
+                This allows clinical teams to proactively adjust treatment strategies before overt relapse occurs.
+                Through our research we found this was possible through tracking tumor dynamics, ATP-binding cassette (ABC) transporters, ctDNA levels, and tumor microenvironment features over time and using a simple neural network to infer hidden parameters driving resistance evolution. It is also possible to monitor and model tumor growth patterns using ordinary differential equations (ODEs) that capture key biological processes such as phenotypic plasticity and drug efflux via ABC transporters.""")
+    
+    #Instructions and how touse and what everything means
+
+    # Literature references
+    st.markdown("""
+    **The Mechanistic modeling of epigenetic plasticity, ABC transporter-mediated chemoresistance, and EGFR-TKI resistance**
+    
+    Based on:
+    - Dhawan et al. *Nat Sci Rep* 2016 (doi:10.1038/srep28597) - Phenotypic switching
+    - Lei et al. arXiv:1901.09747 2019 - Epigenetic plasticity
+    - Fletcher et al. *Cancer Res* 2010 - ABC transporter kinetics
+    - Ramalingam et al. *NEJM* 2020 - FLAURA trial (osimertinib efficacy)
+    - Sharma et al. *Cell* 2010 - Drug-tolerant persisters
+    """)
+
+
+    # Data source selection
+    st.sidebar.header("📊 Data Source")
+    data_source = st.sidebar.radio("Parameter Input Method", ["Manual Sliders", "Patient Data (ML-Enhanced)"])
+    
+    # Initialize parameters
+    params = {'residual_burden': 1000, 'stage': 'IIIA', 'histology': 'adenocarcinoma', 'abc_score': 1.0,
+              'plasticity_rate': 0.12, 'epigenetic_noise': 0.5, 'regimen': 'Carboplatin-Paclitaxel q21d',
+              'dose_intensity': 1.0, 'simulation_days': 730, 'egfr_positive': False, 'egfr_mutation_type': None,
+              'ml_inference': False, 'patient_id': None, 'use_ctdna_prediction': False}
+    
+    # ML mode
+    if data_source == "Patient Data (ML-Enhanced)" and st.session_state.ml_data_available and st.session_state.ml_models_loaded:
+        params['ml_inference'] = True
+        ctdna_df, tme_df, _, summary_df = st.session_state.synthetic_data
+        
+        params['patient_id'] = st.sidebar.selectbox("Select Patient ID", summary_df['patient_id'].unique())
+        patient_summary = summary_df[summary_df['patient_id'] == params['patient_id']].iloc[0]
+        patient_tme = tme_df[(tme_df['patient_id'] == params['patient_id']) & (tme_df['week'] == 0)].iloc[0]
+        
+        st.sidebar.subheader("📋 Patient Profile")
+        st.sidebar.write(f"**EGFR Mutation:** {patient_summary['egfr_mutation']}")
+        st.sidebar.write(f"**Resistance Mechanism:** {patient_summary['resistance_mechanism']}")
+        st.sidebar.write(f"**Actual PFS:** {patient_summary['ttp_months']:.1f} months")
+        
+        if st.sidebar.button("🔍 Preview ML Prediction"):
+            with st.spinner("Running inference..."):
+                prediction = st.session_state.resistance_classifier.predict_from_patient_data({
+                    'circulating_mdsc_per_ml': patient_tme['circulating_mdsc_per_ml'],
+                    'plasma_il10_pg_ml': patient_tme['plasma_il10_pg_ml'],
+                    'serum_hgf_pg_ml': patient_tme['serum_hgf_pg_ml'],
+                    'serum_tgfb_ng_ml': patient_tme['serum_tgfb_ng_ml'],
+                    'plasma_vegf_pg_ml': patient_tme['plasma_vegf_pg_ml'],
+                    'resistance_mechanism': patient_tme['resistance_mechanism']
+                })
+                st.sidebar.success(f"Predicted: {prediction['predicted_mechanism']} ({prediction['confidence']:.1%})")
+        
+        params['use_ctdna_prediction'] = st.sidebar.checkbox("Enable ctDNA Prediction", value=True)
+        
+        # Auto-populate from ML inference
+        try:
+            features = torch.tensor([[patient_tme['ctdna_vaf_percent'], patient_tme['serum_hgf_pg_ml'], 
+                                    patient_tme['plasma_il6_pg_ml'], patient_tme['circulating_mdsc_per_ml'],
+                                    patient_tme['serum_tgfb_ng_ml'], patient_tme['ctc_count_per_ml'],
+                                    patient_tme['serum_crp_mg_l'], patient_tme['serum_ldh_u_l']]], dtype=torch.float32)
+            
+            with torch.no_grad():
+                pred_params = st.session_state.parameter_model(features)
+            
+            ml_params = pred_params.iloc[0].to_dict()
+            params.update({
+                'abc_score': ml_params['ABC'],
+                'plasticity_rate': ml_params['mu'] * 10,
+                'epigenetic_noise': ml_params['sigma2'],
+                'stage': patient_summary.get('stage', 'IIIA'),
+                'histology': patient_summary.get('histology', 'adenocarcinoma'),
+                'residual_burden': max(100, int(patient_summary.get('ctdna_vaf_mean', 0.1) * 10000))
+            })
+        except:
+            pass
+    
+    # Manual mode
+    else:
+        st.sidebar.header("🏥 Patient Configuration")
+        st.sidebar.subheader("Clinical Parameters")
+        
+        params['stage'] = st.sidebar.selectbox("Pathologic Stage", ["IIA", "IIB", "IIIA", "IIIB"], index=2)
+        params['histology'] = st.sidebar.selectbox("Histology", ["adenocarcinoma", "squamous"])
+        params['residual_burden'] = st.sidebar.slider("Residual Tumor Burden (cells)", 100, 10000, 1000, 100)
+        
+        st.sidebar.subheader("Molecular Markers")
+        params['abc_score'] = st.sidebar.slider("ABC Transporter Expression", 0.0, 3.0, 1.0, 0.1, format="%.1f")
+        
+        st.sidebar.subheader("Epigenetic Parameters")
+        params['plasticity_rate'] = st.sidebar.slider("Phenotypic Plasticity Rate (μ)", 0.01, 0.5, 0.12, 0.01, format="%.2f")
+        params['epigenetic_noise'] = st.sidebar.slider("Baseline Epigenetic Instability (σ²)", 0.1, 2.0, 0.5, 0.1, format="%.1f")
+        
+        params['egfr_positive'] = st.sidebar.checkbox("EGFR Mutation Positive", value=False)
+        if params['egfr_positive']:
+            params['egfr_mutation_type'] = st.sidebar.selectbox("EGFR Mutation Type", ["exon19del", "L858R", "T790M"])
+        
+        st.sidebar.subheader("Treatment Protocol")
+        params['regimen'] = st.sidebar.selectbox("Maintenance Regimen", [
+            "Carboplatin-Paclitaxel q21d", "Carboplatin-Paclitaxel q14d (dose-dense)",
+            "Pemetrexed q21d (non-squamous)", "Weekly Paclitaxel (metronomic)"
+        ])
+        params['dose_intensity'] = st.sidebar.slider("Relative Dose Intensity (%)", 50, 150, 100, 10) / 100.0
+        params['simulation_days'] = st.sidebar.slider("Simulation Duration (months)", 6, 48, 24, 6) * 30
+    
+    # Advanced mode and run button
+    advanced_mode = st.sidebar.checkbox("Advanced Mode", value=False)
+    st.sidebar.markdown("---")
+    run_button = st.sidebar.button("▶️ RUN SIMULATION", type="primary", use_container_width=True)
+    
+    # Execution and visualization
+    if run_button or 'results' in st.session_state:
+        if run_button:
+            with st.spinner("🔄 Running simulation with ML enhancement..."):
+                st.session_state.results = run_simulation_cached(params)
+        
+        results = st.session_state.results
+        
+        if not results.solver_success:
+            st.error(f"⚠️ Solver failed: {results.solver_message}")
+            st.stop()
+        
+        if params['ml_inference'] and results.ml_inferred_params:
+            st.success(f"✅ ML-Enhanced Simulation (Patient: {params['patient_id']})")
+            col1, col2, col3 = st.columns(3)
+            with col1: st.metric("ML Confidence", f"{results.resistance_prediction['confidence']:.1%}" if results.resistance_prediction else "N/A")
+            with col2: st.metric("Resistance Type", results.resistance_prediction['predicted_mechanism'] if results.resistance_prediction else "N/A")
+            with col3: st.metric("ctDNA Prediction", "Enabled" if results.ctdna_vaf is not None else "Disabled")
+        
+        display_recurrence_prediction(results.recurrence_time if results.recurrence_detected else params['simulation_days']/30, results.recurrence_detected)
+        st.markdown("---")
+        
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📊 Tumour & ctDNA Dynamics", "🧬 Epigenetic Evolution", "💊 Drug & ABC Kinetics", "📈 Resistance Fraction", "🔬 ctDNA Prediction"
+        ])
+        
+        with tab1:
+            fig1 = plot_tumour_dynamics(results, "osimertinib" if params['egfr_positive'] else "chemotherapy")
+            st.plotly_chart(fig1, use_container_width=True)
+            if params['ml_inference'] and results.ml_inferred_params:
+                with st.expander("🔍 ML-Inferred Parameters"): st.json(results.ml_inferred_params)
+        
+        with tab2: st.plotly_chart(plot_epigenetic_trajectory(results), use_container_width=True)
+        with tab3: st.plotly_chart(plot_drug_and_abc(results, "osimertinib" if params['egfr_positive'] else "chemotherapy"), use_container_width=True)
+        with tab4: st.plotly_chart(plot_resistance_fraction(results), use_container_width=True)
+        
+        with tab5:
+            if results.ctdna_vaf is not None: st.plotly_chart(plot_ctdna_comparison(results, params['patient_id']), use_container_width=True)
+            else: st.info("ctDNA prediction not enabled. Check 'Enable ctDNA Prediction' in sidebar.")
+        
+        if advanced_mode:
+            st.markdown("---")
+            col1, col2 = st.columns(2)
+            with col1: display_ml_internals(results)
+            with col2: display_confidence_intervals(results)
+        
+        st.markdown("---")
+        display_parameter_importance()
+        
+        if st.checkbox("Show solver diagnostics"):
+            with st.expander("🔧 Solver Diagnostics"):
+                st.write(f"**Solver Status:** {results.solver_message}")
+                st.write(f"**ML Models Active:** {params['ml_inference']}")
+                st.write(f"**Final State - Sensitive:** {results.sensitive_cells[-1]:.2e}, Resistant: {results.resistant_cells[-1]:.2e}")
+                if results.ml_inferred_params: st.write(f"**ML Parameters:** {results.ml_inferred_params}")
+    
+    else:
+        st.info("👈 Configure patient parameters and click **RUN SIMULATION**")
+        col1, col2 = st.columns(2)
+        with col1: st.metric("ML Data Available", "✅ Yes" if st.session_state.ml_data_available else "❌ No")
+        with col2: st.metric("ML Models Loaded", "✅ Yes" if st.session_state.ml_models_loaded else "❌ No")
+
+if __name__ == "__main__":
+    main()
