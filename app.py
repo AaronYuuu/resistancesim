@@ -193,7 +193,7 @@ def run_simulation_cached(
         
         # Event detection: stop when recurrence threshold reached
         def recurrence_event(t, y):
-            """Event function: triggers when total tumor burden exceeds 1e8"""
+            """Event function: triggers when total tumour burden exceeds 1e8"""
             return (y[0] + y[1]) - 1e8
     
     recurrence_event.terminal = True
@@ -277,8 +277,8 @@ def run_simulation_cached(
 # ============================================================================
 # VISUALIZATION FUNCTIONS
 # ============================================================================
-def plot_tumor_dynamics(results: SimulationResults, treatment_type: str = "chemotherapy") -> go.Figure:
-    """Main tumor population plot"""
+def plot_tumour_dynamics(results: SimulationResults, treatment_type: str = "chemotherapy") -> go.Figure:
+    """Main tumour population plot"""
     fig = go.Figure()
     
     time_months = results.time / 30.44
@@ -303,7 +303,7 @@ def plot_tumor_dynamics(results: SimulationResults, treatment_type: str = "chemo
     fig.add_trace(go.Scatter(
         x=time_months,
         y=total_cells,
-        name='Total Tumor Burden',
+        name='Total tumour Burden',
         line=dict(color='#2ca02c', width=3),
         hovertemplate='%{y:.2e} cells<extra></extra>'
     ))
@@ -319,7 +319,7 @@ def plot_tumor_dynamics(results: SimulationResults, treatment_type: str = "chemo
     
     treatment_title = "Osimertinib (EGFR-TKI)" if treatment_type == "osimertinib" else "Maintenance Chemotherapy"
     fig.update_layout(
-        title=f"Tumor Population Dynamics Under {treatment_title}",
+        title=f"tumour Population Dynamics Under {treatment_title}",
         xaxis_title="Time (months)",
         yaxis_title="Cell Count",
         yaxis_type="log",
@@ -478,7 +478,7 @@ def display_parameter_importance() -> None:
     - **Higher ABC expression** → faster drug efflux → earlier risk of recurrence.
     - **Higher phenotypic plasticity (μ)** → more rapid S→R switching → earlier recurrence.
     - **Higher epigenetic instability (σ²)** → more non-genetic variability → broader resistance emergence.
-    - **More dose-dense / metronomic regimens** can delay recurrence in highly plastic tumors.
+    - **More dose-dense / metronomic regimens** can delay recurrence in highly plastic tumours.
     """)
 
 # ============================================================================
@@ -486,7 +486,7 @@ def display_parameter_importance() -> None:
 # ============================================================================
 def main():
     # Header
-    st.title("🔬 NSCLC Tumor Resistance & Recurrence Simulator")
+    st.title("🔬 NSCLC tumour Resistance & Recurrence Simulator")
     st.markdown("""
     **Mechanistic modeling of epigenetic plasticity, ABC transporter-mediated chemoresistance, and EGFR-TKI resistance**
     
@@ -505,7 +505,7 @@ def main():
     
     with st.sidebar.expander("ℹ️ About Clinical Parameters"):
         st.markdown("""
-        **Pathologic Stage:** Anatomic extent per AJCC TNM classification.(1) Stage affects tumor carrying capacity:
+        **Pathologic Stage:** Anatomic extent per AJCC TNM classification.(1) Stage affects tumour carrying capacity:
         - IIA (T2bN0M0): K=10⁹ cells, 5-yr survival 60%
         - IIB (T2bN1/T3N0): K=5×10⁹ cells, 5-yr survival 53%
         - IIIA (T1-3N2/T4N0-1): K=10¹⁰ cells, 5-yr survival 36%
@@ -530,7 +530,7 @@ def main():
     )
     
     residual_burden = st.sidebar.slider(
-        "Residual Tumor Burden (cells)",
+        "Residual tumour Burden (cells)",
         min_value=100,
         max_value=10000,
         value=1000,
@@ -812,7 +812,7 @@ def main():
         
         # Visualization tabs
         tab1, tab2, tab3, tab4 = st.tabs([
-            "📊 Tumor Dynamics",
+            "📊 tumour Dynamics",
             "🧬 Epigenetic Evolution",
             "💊 Drug & ABC Kinetics",
             "📈 Resistance Fraction"
@@ -832,7 +832,7 @@ def main():
                 """)
             
             treatment_type = "osimertinib" if egfr_positive else "chemotherapy"
-            fig1 = plot_tumor_dynamics(results, treatment_type)
+            fig1 = plot_tumour_dynamics(results, treatment_type)
             st.plotly_chart(fig1, use_container_width=True)
             
             col1, col2, col3 = st.columns(3)
@@ -852,7 +852,7 @@ def main():
                 initial_total = initial_sensitive + initial_resistant
                 total_burden = results.sensitive_cells[-1] + results.resistant_cells[-1]
                 delta_total = total_burden - initial_total
-                st.metric("Total Tumor Burden", f"{total_burden:.2e}",
+                st.metric("Total tumour Burden", f"{total_burden:.2e}",
                          delta=f"{delta_total:.2e}")
         
         with tab2:

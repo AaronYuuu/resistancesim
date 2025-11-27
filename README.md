@@ -1,4 +1,4 @@
-# NSCLC Tumor Resistance & Recurrence Simulator
+# NSCLC tumour Resistance & Recurrence Simulator
 
 **A Demonstration Tool for Mechanistic Modeling of Chemoresistance Dynamics in Non-Small Cell Lung Cancer**
 
@@ -96,9 +96,9 @@ docker run -p 8501:8501 nsclc-simulator
 Users may adjust the following model parameters to explore theoretical scenarios:
 
 **Clinical Context Variables:**
-- **Pathologic Stage** (IIA-IIIB): Modulates tumor carrying capacity based on post-surgical anatomic extent
+- **Pathologic Stage** (IIA-IIIB): Modulates tumour carrying capacity based on post-surgical anatomic extent
 - **Histology** (Adenocarcinoma/Squamous): Affects baseline proliferation rates per published growth kinetics
-- **Residual Tumor Burden** (10²-10⁴ cells): Initial condition representing microscopic residual disease post-R0 resection
+- **Residual tumour Burden** (10²-10⁴ cells): Initial condition representing microscopic residual disease post-R0 resection
 
 **Molecular Biomarker Inputs:**
 - **ABC Transporter Expression** (IHC score 0-3): Parameterizes efflux pump density affecting intracellular drug retention
@@ -112,7 +112,7 @@ Users may adjust the following model parameters to explore theoretical scenarios
 
 ### Simulation Execution
 
-The numerical solver employs adaptive time-stepping (LSODA algorithm) with event detection for automated identification of recurrence threshold crossings (defined as tumor burden ≥ 10⁸ cells).
+The numerical solver employs adaptive time-stepping (LSODA algorithm) with event detection for automated identification of recurrence threshold crossings (defined as tumour burden ≥ 10⁸ cells).
 
 ### Output Interpretation
 
@@ -132,7 +132,7 @@ The numerical solver employs adaptive time-stepping (LSODA algorithm) with event
 ### Calibration Approach
 
 Model parameters have been constrained to physiologically plausible ranges derived from published literature, including:
-- Tumor growth rates from longitudinal imaging studies
+- tumour growth rates from longitudinal imaging studies
 - Drug pharmacokinetic parameters from phase I/II trials  
 - ABC transporter expression levels from immunohistochemical analyses
 - Epigenetic switching rates from single-cell lineage tracing experiments
@@ -151,17 +151,17 @@ Sobol variance decomposition identifies parameters with greatest influence on mo
 1. **Epigenetic Instability (σ²)**: Total-order index ST = 0.42
 2. **Phenotypic Plasticity Rate (μ)**: ST = 0.35
 3. **ABC Transporter Expression**: ST = 0.28
-4. **Initial Tumor Burden**: ST = 0.18
+4. **Initial tumour Burden**: ST = 0.18
 
 ### Critical Limitations
 
 This demonstration model incorporates substantial simplifications:
 
-- **Spatial homogeneity assumption**: No consideration of tumor microarchitecture or intratumoral heterogeneity
+- **Spatial homogeneity assumption**: No consideration of tumour microarchitecture or intratumoural heterogeneity
 - **Deterministic dynamics**: Stochastic effects approximated through mean-field epigenetic variance term
 - **Single-pathway resistance**: Does not model alternative resistance mechanisms (e.g., MET amplification, EMT)
 - **Fixed pharmacokinetics**: Patient-specific PK variability not incorporated
-- **Absence of immune dynamics**: No representation of anti-tumor immune responses or immunosuppression
+- **Absence of immune dynamics**: No representation of anti-tumour immune responses or immunosuppression
 
 **These limitations preclude clinical application. The tool serves exclusively as a demonstration of computational modeling approaches in oncology.**
 
@@ -226,7 +226,7 @@ The interface provides optional diagnostic output including:
 **Model output validation:**
 - Cross-reference parameter values against literature-derived constraints
 - Compare predictions against provided calibration scenarios
-- Ensure treatment protocol selection is appropriate for specified tumor histology
+- Ensure treatment protocol selection is appropriate for specified tumour histology
 
 **Performance optimization:**
 - Utilize result caching for repeated parameter configurations
@@ -268,11 +268,11 @@ Potential enhancements to this demonstration framework include:
 - Integration of spatial heterogeneity via hybrid agent-based modeling components
 - Implementation of stochastic differential equation formulations for improved representation of phenotypic noise
 - Bayesian parameter inference frameworks for individualized model calibration
-- Multi-scale coupling with circulating tumor DNA (ctDNA) dynamics
+- Multi-scale coupling with circulating tumour DNA (ctDNA) dynamics
 
 ### Biological Complexity
 - Incorporation of alternative resistance pathways (MET amplification, epithelial-mesenchymal transition)
-- Representation of tumor microenvironment interactions (hypoxia, stromal signaling)
+- Representation of tumour microenvironment interactions (hypoxia, stromal signaling)
 - Integration of immune checkpoint dynamics for combination therapy scenarios
 - Pharmacogenomic variability in drug metabolism
 
@@ -284,7 +284,7 @@ If this demonstration tool proves useful in educational or research contexts, pl
 
 ```bibtex
 @software{nsclc_resistance_simulator,
-  title={NSCLC Tumor Resistance and Recurrence Simulator: 
+  title={NSCLC tumour Resistance and Recurrence Simulator: 
          A Demonstration Tool for Mechanistic Modeling of Chemoresistance},
   author={[Author Names]},
   year={2025},
