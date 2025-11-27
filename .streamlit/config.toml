@@ -1,0 +1,10 @@
+[theme]
+primaryColor="#0e4a9e"
+backgroundColor="#ffffff"
+secondaryBackgroundColor="#e6f0ff"
+textColor="#262730"
+font="serif"  # More clinical feel
+
+[server]
+maxUploadSize=50
+port=8501
