@@ -187,7 +187,7 @@ class PatientProfile:
             'ec50_resistant': CARBOPLATIN['ec50_resistant'],
             'hill_coefficient': 2.0,
             'max_kill_rate': 0.8,  # Max kill rate at saturation (Dhawan 2016: 70-90% over 48hr)
-            'drug_clearance_rate': CARBOPLATIN['clearance_rate'] / 24,  # Convert hr^-1 to day^-1
+            'drug_clearance_rate': CARBOPLATIN['clearance_rate'] * 24,  # Convert hr^-1 to day^-1 (was incorrectly divided)
             'vmax_abc': ABC_TRANSPORTERS['Vmax_abcc1'],
             'km_abc': ABC_TRANSPORTERS['Km_carboplatin'],
             'abc_induction_rate': ABC_TRANSPORTERS['induction_per_cycle'],
