@@ -226,7 +226,7 @@ class SyntheticTMEGrapher:
         
     def create_training_graphs(self) -> List[Data]:
         """
-        Convert synthetic data to PyG graphs
+        Convert synthetic data to PyG graphs with augmented data and enhanced features
         """
         graphs = []
         
@@ -235,54 +235,159 @@ class SyntheticTMEGrapher:
             patient_tme = self.tme[self.tme['patient_id'] == pid].iloc[0]
             patient_ctdna = self.ctdna[self.ctdna['patient_id'] == pid].iloc[0]
             
-            # Merge data into patient_data dict
-            patient_data = {
-                # Tumor features
-                'tumor_burden': 1e6 * (1 + patient_ctdna['ctdna_vaf_percent']),
-                'proliferation_rate': 0.05,
-                'resistance_mechanism': patient_ctdna['resistance_mechanism'],
-                'baseline_vaf': patient_ctdna['ctdna_vaf_percent'],
-                
-                # Immune features
-                'cd8_density': patient_tme.get('circulating_mdsc_per_ml', 100) * 0.5,  # Approximate
-                'cd8_activation': 0.5,
-                'cd8_tumor_distance': patient_tme.get('serum_crp_mg_l', 50) / 2,  # Approximate correlation
-                
-                # Myeloid features
-                'm2_tam_density': patient_tme.get('circulating_mdsc_per_ml', 50) * 0.8,
-                'm2_activation': 0.6,
-                'mdsc_density': patient_tme['circulating_mdsc_per_ml'],
-                'mdsc_suppression': min(patient_tme['plasma_il10_pg_ml'] / 10, 1.0),
-                'mdsc_tumor_proximity': 80,
-                
-                # Stromal features
-                'caf_density': patient_tme.get('serum_tgfb_ng_ml', 10) * 5,
-                'caf_activation': min(patient_tme['serum_tgfb_ng_ml'] / 20, 1.0),
-                'tgf_beta': patient_tme['serum_tgfb_ng_ml'],
-                
-                # Vascular features
-                'vessel_density': 150,
-                'vascular_permeability': 0.4,
-                'vegf_level': patient_tme['plasma_vegf_pg_ml'] / 100,
-                
-                # Cytokines
-                'hgf_level': patient_tme['serum_hgf_pg_ml'],
-                'il10_level': patient_tme['plasma_il10_pg_ml'] / 10,
-                
-                # Interaction strengths (simplified)
-                '0_2_strength': 0.7 if patient_ctdna['resistance_mechanism'] == 'MET_amp' else 0.3,
-                '3_1_strength': min(patient_tme['plasma_il10_pg_ml'] / 50, 1.0),
-                '4_0_strength': min(patient_tme['serum_tgfb_ng_ml'] / 30, 1.0)
-            }
+            # Base patient_data
+            base_patient_data = self._create_patient_data(patient_tme, patient_ctdna)
             
-            # Build graph
+            # Create original graph
             classifier = TMEGraphClassifier()
-            graph = classifier.build_tme_graph(patient_data)
+            graph = classifier.build_tme_graph(base_patient_data)
             graph.patient_id = pid
-            
             graphs.append(graph)
             
+            # Augment data: create 3 variations per patient for better training
+            for aug_idx in range(3):
+                augmented_data = self._augment_patient_data(base_patient_data, patient_ctdna['resistance_mechanism'])
+                graph_aug = classifier.build_tme_graph(augmented_data)
+                graph_aug.patient_id = f"{pid}_aug{aug_idx}"
+                graphs.append(graph_aug)
+        
         return graphs
+    
+    def _create_patient_data(self, patient_tme: pd.Series, patient_ctdna: pd.Series) -> Dict:
+        """
+        Create comprehensive patient_data dict with enhanced features
+        """
+        resistance = patient_ctdna['resistance_mechanism']
+        
+        # Base features
+        patient_data = {
+            # Tumor features
+            'tumor_burden': 1e6 * (1 + patient_ctdna['ctdna_vaf_percent']),
+            'proliferation_rate': 0.05,
+            'resistance_mechanism': resistance,
+            'baseline_vaf': patient_ctdna['ctdna_vaf_percent'],
+            'resistance_type': resistance,  # For phenotype
+            
+            # Enhanced immune features
+            'cd8_density': patient_tme.get('circulating_mdsc_per_ml', 100) * 0.5,
+            'cd8_activation': 0.5,
+            'cd8_tumor_distance': patient_tme.get('serum_crp_mg_l', 50) / 2,
+            'cd4_density': patient_tme.get('circulating_mdsc_per_ml', 80) * 0.3,
+            'b_cell_density': patient_tme.get('plasma_il10_pg_ml', 5) * 10,
+            'nk_cell_density': patient_tme.get('serum_ldh_u_l', 200) / 500,
+            
+            # Enhanced myeloid features
+            'm2_tam_density': patient_tme.get('circulating_mdsc_per_ml', 50) * 0.8,
+            'm2_activation': 0.6,
+            'm1_macrophage_density': patient_tme.get('circulating_mdsc_per_ml', 30) * 0.4,
+            'mdsc_density': patient_tme['circulating_mdsc_per_ml'],
+            'mdsc_suppression': min(patient_tme['plasma_il10_pg_ml'] / 10, 1.0),
+            'mdsc_tumor_proximity': 80,
+            'neutrophil_density': patient_tme.get('serum_ldh_u_l', 150) / 300,
+            
+            # Enhanced stromal features
+            'caf_density': patient_tme.get('serum_tgfb_ng_ml', 10) * 5,
+            'caf_activation': min(patient_tme['serum_tgfb_ng_ml'] / 20, 1.0),
+            'caf_tumor_proximity': 30,
+            'fibroblast_density': patient_tme.get('serum_tgfb_ng_ml', 15) * 3,
+            
+            # Enhanced vascular features
+            'vessel_density': 150,
+            'vascular_permeability': 0.4,
+            'vegf_level': patient_tme['plasma_vegf_pg_ml'] / 100,
+            'angiopoietin_level': patient_tme.get('plasma_vegf_pg_ml', 50) / 200,
+            
+            # Enhanced cytokines
+            'hgf_level': patient_tme['serum_hgf_pg_ml'],
+            'il10_level': patient_tme['plasma_il10_pg_ml'] / 10,
+            'il6_level': patient_tme['plasma_il6_pg_ml'] / 10,
+            'tgf_beta': patient_tme['serum_tgfb_ng_ml'],
+            'ifn_gamma': patient_tme.get('plasma_il10_pg_ml', 2) * 0.5,  # Approximate
+            'il1_beta': patient_tme.get('serum_crp_mg_l', 3) * 2,
+            
+            # Mechanism-specific interaction strengths
+            '0_2_strength': self._get_interaction_strength(resistance, '0_2'),
+            '0_3_strength': self._get_interaction_strength(resistance, '0_3'),
+            '2_4_strength': self._get_interaction_strength(resistance, '2_4'),
+            '3_1_strength': self._get_interaction_strength(resistance, '3_1'),
+            '4_0_strength': self._get_interaction_strength(resistance, '4_0'),
+            '1_0_strength': self._get_interaction_strength(resistance, '1_0'),
+            '5_0_strength': self._get_interaction_strength(resistance, '5_0'),
+            '4_5_strength': self._get_interaction_strength(resistance, '4_5')
+        }
+        
+        # Mechanism-specific adjustments
+        if resistance == 'Loss_T790M':
+            patient_data['mdsc_density'] *= 1.5  # Boost MDSC for T790M
+            patient_data['il10_level'] *= 1.2
+            patient_data['mdsc_suppression'] = min(patient_data['mdsc_suppression'] * 1.3, 1.0)
+        elif resistance == 'MET_amp':
+            patient_data['caf_density'] *= 1.4
+            patient_data['hgf_level'] *= 1.5
+            patient_data['tgf_beta'] *= 1.2
+        elif resistance == 'C797S':
+            patient_data['m2_tam_density'] *= 1.3
+            patient_data['il6_level'] *= 1.4
+        # No Resistance and Other remain baseline
+        
+        return patient_data
+    
+    def _get_interaction_strength(self, resistance_mechanism: str, interaction_type: str) -> float:
+        """
+        Get mechanism-specific interaction strengths based on biological knowledge
+        """
+        base_strengths = {
+            'No Resistance': {
+                '0_2': 0.3, '0_3': 0.2, '2_4': 0.4, '3_1': 0.3,
+                '4_0': 0.5, '1_0': 0.8, '5_0': 0.4, '4_5': 0.3
+            },
+            'C797S': {
+                '0_2': 0.6, '0_3': 0.7, '2_4': 0.5, '3_1': 0.8,
+                '4_0': 0.6, '1_0': 0.4, '5_0': 0.5, '4_5': 0.4
+            },
+            'MET_amp': {
+                '0_2': 0.8, '0_3': 0.5, '2_4': 0.7, '3_1': 0.4,
+                '4_0': 0.9, '1_0': 0.3, '5_0': 0.6, '4_5': 0.5
+            },
+            'Loss_T790M': {
+                '0_2': 0.5, '0_3': 0.9, '2_4': 0.6, '3_1': 0.9,
+                '4_0': 0.7, '1_0': 0.2, '5_0': 0.3, '4_5': 0.4
+            },
+            'Other': {
+                '0_2': 0.4, '0_3': 0.4, '2_4': 0.4, '3_1': 0.4,
+                '4_0': 0.4, '1_0': 0.4, '5_0': 0.4, '4_5': 0.4
+            }
+        }
+        
+        return base_strengths.get(resistance_mechanism, base_strengths['Other']).get(interaction_type, 0.5)
+    
+    def _augment_patient_data(self, base_data: Dict, resistance: str) -> Dict:
+        """
+        Create augmented version with slight perturbations for data augmentation
+        """
+        import numpy as np
+        
+        augmented = base_data.copy()
+        
+        # Add noise to continuous features
+        noise_features = [
+            'tumor_burden', 'cd8_density', 'm2_tam_density', 'mdsc_density', 'caf_density',
+            'vessel_density', 'hgf_level', 'il10_level', 'il6_level', 'tgf_beta', 'vegf_level'
+        ]
+        
+        for feature in noise_features:
+            if feature in augmented:
+                noise = np.random.normal(0, 0.1)  # 10% noise
+                augmented[feature] *= (1 + noise)
+                augmented[feature] = max(0, augmented[feature])  # Ensure non-negative
+        
+        # Slightly vary interaction strengths
+        strength_keys = [k for k in augmented.keys() if 'strength' in k]
+        for key in strength_keys:
+            noise = np.random.normal(0, 0.05)  # Small variation
+            augmented[key] = np.clip(augmented[key] + noise, 0.1, 1.0)
+        
+        return augmented
 
 def train_gnn_classifier(graphs: List[Data], epochs: int = 100) -> Dict[str, float]:
     """

@@ -731,6 +731,7 @@ def main():
         params['patient_id'] = st.sidebar.selectbox("Select Patient ID", summary_df['patient_id'].unique())
         patient_summary = summary_df[summary_df['patient_id'] == params['patient_id']].iloc[0]
         patient_tme = tme_df[(tme_df['patient_id'] == params['patient_id']) & (tme_df['week'] == 0)].iloc[0]
+        patient_ctdna = ctdna_df[(ctdna_df['patient_id'] == params['patient_id']) & (ctdna_df['week'] == 0)].iloc[0]
         
         st.sidebar.subheader("📋 Patient Profile")
         st.sidebar.write(f"**EGFR Mutation:** {patient_summary['egfr_mutation']}")
@@ -739,14 +740,48 @@ def main():
         
         if st.sidebar.button("🔍 Preview ML Prediction"):
             with st.spinner("Running inference..."):
-                prediction = st.session_state.resistance_classifier.predict_from_patient_data({
-                    'circulating_mdsc_per_ml': patient_tme['circulating_mdsc_per_ml'],
-                    'plasma_il10_pg_ml': patient_tme['plasma_il10_pg_ml'],
-                    'serum_hgf_pg_ml': patient_tme['serum_hgf_pg_ml'],
-                    'serum_tgfb_ng_ml': patient_tme['serum_tgfb_ng_ml'],
-                    'plasma_vegf_pg_ml': patient_tme['plasma_vegf_pg_ml'],
-                    'resistance_mechanism': patient_tme['resistance_mechanism']
-                })
+                # Build complete patient data structure for ML model
+                patient_data = {
+                    # Tumor features from ctDNA data
+                    'tumor_burden': 1e6 * (1 + patient_ctdna['ctdna_vaf_percent']),
+                    'proliferation_rate': 0.05,
+                    'resistance_mechanism': patient_tme['resistance_mechanism'],
+                    'baseline_vaf': patient_ctdna['ctdna_vaf_percent'],
+                    
+                    # Immune features (approximated from available data)
+                    'cd8_density': patient_tme.get('circulating_mdsc_per_ml', 100) * 0.5,
+                    'cd8_activation': 0.5,
+                    'cd8_tumor_distance': patient_tme.get('serum_crp_mg_l', 50) / 2,
+                    
+                    # Myeloid features
+                    'm2_tam_density': patient_tme.get('circulating_mdsc_per_ml', 50) * 0.8,
+                    'm2_activation': 0.6,
+                    'mdsc_density': patient_tme['circulating_mdsc_per_ml'],
+                    'mdsc_suppression': min(patient_tme['plasma_il10_pg_ml'] / 10, 1.0),
+                    'mdsc_tumor_proximity': 80,
+                    
+                    # Stromal features
+                    'caf_density': patient_tme.get('serum_tgfb_ng_ml', 10) * 5,
+                    'caf_activation': min(patient_tme['serum_tgfb_ng_ml'] / 20, 1.0),
+                    'caf_tumor_proximity': 30,
+                    
+                    # Vascular features
+                    'vessel_density': 150,
+                    'vascular_permeability': 0.4,
+                    
+                    # Cytokines (from blood data)
+                    'hgf_level': patient_tme['serum_hgf_pg_ml'],
+                    'il10_level': patient_tme['plasma_il10_pg_ml'] / 10,
+                    'tgf_beta': patient_tme['serum_tgfb_ng_ml'],
+                    'vegf_level': patient_tme['plasma_vegf_pg_ml'] / 100,
+                    
+                    # Interaction strengths (based on resistance mechanism)
+                    '0_2_strength': 0.7 if patient_tme['resistance_mechanism'] == 'MET_amp' else 0.3,
+                    '3_1_strength': min(patient_tme['plasma_il10_pg_ml'] / 50, 1.0),
+                    '4_0_strength': min(patient_tme['serum_tgfb_ng_ml'] / 30, 1.0)
+                }
+                
+                prediction = st.session_state.resistance_classifier.predict_from_patient_data(patient_data)
                 st.sidebar.success(f"Predicted: {prediction['predicted_mechanism']} ({prediction['confidence']:.1%})")
         
         params['use_ctdna_prediction'] = st.sidebar.checkbox("Enable ctDNA Prediction", value=True)
