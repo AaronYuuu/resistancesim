@@ -153,9 +153,11 @@ class TMEGraphClassifier(nn.Module):
         ], dtype=torch.float32).reshape(-1, 1)
         
         # Labels
-        resistance_idx = self.RESISTANCE_CLASSES.index(
-            patient_data.get('resistance_mechanism', 'No Resistance')
-        )
+        resistance_mechanism = patient_data.get('resistance_mechanism', 'No Resistance')
+        if resistance_mechanism not in self.RESISTANCE_CLASSES:
+            resistance_mechanism = 'No Resistance'  # Default for unknown mechanisms
+        
+        resistance_idx = self.RESISTANCE_CLASSES.index(resistance_mechanism)
         y = torch.tensor(resistance_idx, dtype=torch.long)
         
         return Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y)

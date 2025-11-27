@@ -137,58 +137,100 @@ def run_simulation_cached(params: dict) -> SimulationResults:
     # Initialize ML context
     ml_inferred_params = resistance_prediction = ctdna_vaf = ctdna_uncertainty = None
     
+    custom_patient = params.get('custom_patient', False)
+    
     # ML inference path
-    if ml_inference and patient_id and st.session_state.ml_models_loaded:
+    if ml_inference and (patient_id or custom_patient) and st.session_state.ml_models_loaded:
         try:
-            ctdna_df, tme_df, _, _ = st.session_state.synthetic_data
-            patient_tme = tme_df[(tme_df['patient_id'] == patient_id) & (tme_df['week'] == 0)]
-            patient_ctdna = ctdna_df[(ctdna_df['patient_id'] == patient_id) & (ctdna_df['week'] == 0)]
-            
-            if not patient_tme.empty and not patient_ctdna.empty:
-                # Infer parameters - need both TME and ctDNA data
+            if custom_patient:
+                # Use custom features from sliders
                 features = pd.DataFrame([{
-                    'ctdna_vaf_percent': patient_ctdna['ctdna_vaf_percent'].iloc[0],
-                    'serum_hgf_pg_ml': patient_tme['serum_hgf_pg_ml'].iloc[0],
-                    'plasma_il6_pg_ml': patient_tme['plasma_il6_pg_ml'].iloc[0],
-                    'circulating_mdsc_per_ml': patient_tme['circulating_mdsc_per_ml'].iloc[0],
-                    'serum_tgfb_ng_ml': patient_tme['serum_tgfb_ng_ml'].iloc[0],
-                    'ctc_count_per_ml': patient_tme['ctc_count_per_ml'].iloc[0],
-                    'serum_crp_mg_l': patient_tme['serum_crp_mg_l'].iloc[0],
-                    'serum_ldh_u_l': patient_tme['serum_ldh_u_l'].iloc[0]
+                    'ctdna_vaf_percent': params['custom_features']['ctdna_vaf_percent'],
+                    'serum_hgf_pg_ml': params['custom_features']['serum_hgf_pg_ml'],
+                    'plasma_il6_pg_ml': params['custom_features']['plasma_il6_pg_ml'],
+                    'circulating_mdsc_per_ml': params['custom_features']['circulating_mdsc_per_ml'],
+                    'serum_tgfb_ng_ml': params['custom_features']['serum_tgfb_ng_ml'],
+                    'ctc_count_per_ml': params['custom_features']['ctc_count_per_ml'],
+                    'serum_crp_mg_l': params['custom_features']['serum_crp_mg_l'],
+                    'serum_ldh_u_l': params['custom_features']['serum_ldh_u_l']
                 }])
+                patient_data = {
+                    'tumor_burden': 1e6 * (1 + params['custom_features']['ctdna_vaf_percent']),
+                    'proliferation_rate': 0.05,
+                    'resistance_mechanism': 'Unknown',
+                    'baseline_vaf': params['custom_features']['ctdna_vaf_percent'],
+                    
+                    'cd8_density': params['custom_features']['circulating_mdsc_per_ml'] * 0.5,
+                    'cd8_activation': 0.5,
+                    'cd8_tumor_distance': params['custom_features']['serum_crp_mg_l'] / 2,
+                    
+                    'm2_tam_density': params['custom_features']['circulating_mdsc_per_ml'] * 0.8,
+                    'm2_activation': 0.6,
+                    'mdsc_density': params['custom_features']['circulating_mdsc_per_ml'],
+                    'mdsc_suppression': min(params['custom_features']['plasma_il10_pg_ml'] / 10, 1.0),
+                    'mdsc_tumor_proximity': 80,
+                    
+                    'caf_density': params['custom_features']['serum_tgfb_ng_ml'] * 5,
+                    'caf_activation': min(params['custom_features']['serum_tgfb_ng_ml'] / 20, 1.0),
+                    'tgf_beta': params['custom_features']['serum_tgfb_ng_ml'],
+                    
+                    'vessel_density': 150,
+                    'vascular_permeability': 0.4,
+                    'vegf_level': params['custom_features']['plasma_vegf_pg_ml'] / 100,
+                    
+                    'hgf_level': params['custom_features']['serum_hgf_pg_ml'],
+                    'il10_level': params['custom_features']['plasma_il10_pg_ml'] / 10,
+                    
+                    '0_2_strength': 0.5,
+                    '3_1_strength': min(params['custom_features']['plasma_il10_pg_ml'] / 50, 1.0),
+                    '4_0_strength': min(params['custom_features']['serum_tgfb_ng_ml'] / 30, 1.0)
+                }
+            else:
+                # Use patient data from CSV
+                ctdna_df, tme_df, _, _ = st.session_state.synthetic_data
+                patient_tme = tme_df[(tme_df['patient_id'] == patient_id) & (tme_df['week'] == 0)]
+                patient_ctdna = ctdna_df[(ctdna_df['patient_id'] == patient_id) & (ctdna_df['week'] == 0)]
                 
-                with torch.no_grad():
-                    pred_params = st.session_state.parameter_model.predict_from_pandas(features)
-                
-                ml_inferred_params = pred_params.iloc[0].to_dict()
-                plasticity_rate = ml_inferred_params['mu'] * 10
-                abc_score = ml_inferred_params['ABC']
-                epigenetic_noise = ml_inferred_params['sigma2']
-                
-                # Predict resistance
-                resistance_prediction = st.session_state.resistance_classifier.predict_from_patient_data({
-                    'circulating_mdsc_per_ml': patient_tme['circulating_mdsc_per_ml'].iloc[0],
-                    'plasma_il10_pg_ml': patient_tme['plasma_il10_pg_ml'].iloc[0],
-                    'serum_hgf_pg_ml': patient_tme['serum_hgf_pg_ml'].iloc[0],
-                    'serum_tgfb_ng_ml': patient_tme['serum_tgfb_ng_ml'].iloc[0],
-                    'plasma_vegf_pg_ml': patient_tme['plasma_vegf_pg_ml'].iloc[0],
-                    'resistance_mechanism': patient_tme['resistance_mechanism'].iloc[0]
-                })
-                
-                # Auto-select ODE modules
-                config = st.session_state.selector.select_modules({
-                    'circulating_mdsc_per_ml': patient_tme['circulating_mdsc_per_ml'].iloc[0],
-                    'plasma_il10_pg_ml': patient_tme['plasma_il10_pg_ml'].iloc[0],
-                    'serum_hgf_pg_ml': patient_tme['serum_hgf_pg_ml'].iloc[0],
-                    'serum_tgfb_ng_ml': patient_tme['serum_tgfb_ng_ml'].iloc[0],
-                    'plasma_vegf_pg_ml': patient_tme['plasma_vegf_pg_ml'].iloc[0],
-                    'resistance_mechanism': patient_tme['resistance_mechanism'].iloc[0]
-                })
-                
-                if 'param_overrides' in config:
-                    for param, value in config['param_overrides'].items():
-                        if param == 'mu': plasticity_rate = value
-                        elif param == 'ABC': abc_score = value
+                if not patient_tme.empty and not patient_ctdna.empty:
+                    # Infer parameters - need both TME and ctDNA data
+                    features = pd.DataFrame([{
+                        'ctdna_vaf_percent': patient_ctdna['ctdna_vaf_percent'].iloc[0],
+                        'serum_hgf_pg_ml': patient_tme['serum_hgf_pg_ml'].iloc[0],
+                        'plasma_il6_pg_ml': patient_tme['plasma_il6_pg_ml'].iloc[0],
+                        'circulating_mdsc_per_ml': patient_tme['circulating_mdsc_per_ml'].iloc[0],
+                        'serum_tgfb_ng_ml': patient_tme['serum_tgfb_ng_ml'].iloc[0],
+                        'ctc_count_per_ml': patient_tme['ctc_count_per_ml'].iloc[0],
+                        'serum_crp_mg_l': patient_tme['serum_crp_mg_l'].iloc[0],
+                        'serum_ldh_u_l': patient_tme['serum_ldh_u_l'].iloc[0]
+                    }])
+                    
+                    patient_data = {
+                        'circulating_mdsc_per_ml': patient_tme['circulating_mdsc_per_ml'].iloc[0],
+                        'plasma_il10_pg_ml': patient_tme['plasma_il10_pg_ml'].iloc[0],
+                        'serum_hgf_pg_ml': patient_tme['serum_hgf_pg_ml'].iloc[0],
+                        'serum_tgfb_ng_ml': patient_tme['serum_tgfb_ng_ml'].iloc[0],
+                        'plasma_vegf_pg_ml': patient_tme['plasma_vegf_pg_ml'].iloc[0],
+                        'resistance_mechanism': patient_tme['resistance_mechanism'].iloc[0]
+                    }
+            
+            with torch.no_grad():
+                pred_params = st.session_state.parameter_model.predict_from_pandas(features)
+            
+            ml_inferred_params = pred_params.iloc[0].to_dict()
+            plasticity_rate = ml_inferred_params['mu'] * 10
+            abc_score = ml_inferred_params['ABC']
+            epigenetic_noise = ml_inferred_params['sigma2']
+            
+            # Predict resistance
+            resistance_prediction = st.session_state.resistance_classifier.predict_from_patient_data(patient_data)
+            
+            # Auto-select ODE modules
+            config = st.session_state.selector.select_modules(patient_data)
+            
+            if 'param_overrides' in config:
+                for param, value in config['param_overrides'].items():
+                    if param == 'mu': plasticity_rate = value
+                    elif param == 'ABC': abc_score = value
                         
         except Exception as e:
             st.warning(f"ML inference failed: {e}. Using manual parameters.")
@@ -486,12 +528,12 @@ def display_user_guide():
     - Adjust parameters using intuitive sliders
     - Good for learning and sensitivity analysis
 
-    #### **Option B: ML-Enhanced Patient Data**
-    - Select **"Patient Data (ML-Enhanced)"**
-    - Choose a patient from the dropdown
-    - ML automatically infers parameters from biomarkers
-    - Enables ctDNA prediction and resistance classification
-    - Future goal is to incorporate when to send patients for screenings
+    #### **Option C: Custom Patient (ML-Assisted)**
+    - Select **"Custom Patient (ML-Assisted)"**
+    - Adjust biomarker sliders (ctDNA VAF, cytokines, immune cells, etc.)
+    - ML automatically infers ODE parameters and predicts resistance from your custom profile
+    - Enables full ML assistance without needing existing patient data
+    - Preview resistance prediction before running simulation
 
     ### **2. Configure Patient Parameters**
 
@@ -715,13 +757,13 @@ def main():
 
     # Data source selection
     st.sidebar.header("📊 Data Source")
-    data_source = st.sidebar.radio("Parameter Input Method", ["Manual Sliders", "Patient Data (ML-Enhanced)"])
+    data_source = st.sidebar.radio("Parameter Input Method", ["Manual Sliders", "Patient Data (ML-Enhanced)", "Custom Patient (ML-Assisted)"])
     
     # Initialize parameters
     params = {'residual_burden': 1000, 'stage': 'IIIA', 'histology': 'adenocarcinoma', 'abc_score': 1.0,
               'plasticity_rate': 0.12, 'epigenetic_noise': 0.5, 'regimen': 'Carboplatin-Paclitaxel q21d',
               'dose_intensity': 1.0, 'simulation_days': 730, 'egfr_positive': False, 'egfr_mutation_type': None,
-              'ml_inference': False, 'patient_id': None, 'use_ctdna_prediction': False}
+              'ml_inference': False, 'patient_id': None, 'use_ctdna_prediction': False, 'custom_patient': False, 'custom_features': None}
     
     # ML mode
     if data_source == "Patient Data (ML-Enhanced)" and st.session_state.ml_data_available and st.session_state.ml_models_loaded:
@@ -808,6 +850,121 @@ def main():
         except:
             pass
     
+    # Custom Patient (ML-Assisted) mode
+    elif data_source == "Custom Patient (ML-Assisted)" and st.session_state.ml_data_available and st.session_state.ml_models_loaded:
+        params['ml_inference'] = True
+        params['custom_patient'] = True
+        
+        st.sidebar.header("🏥 Custom Patient Configuration")
+        st.sidebar.subheader("Biomarker Sliders")
+        
+        # Sliders for key biomarkers used in ML models
+        ctdna_vaf = st.sidebar.slider("ctDNA VAF (%)", 0.0, 10.0, 2.0, 0.1, format="%.1f")
+        hgf_level = st.sidebar.slider("Serum HGF (pg/mL)", 0.0, 10.0, 2.5, 0.1, format="%.1f")
+        il6_level = st.sidebar.slider("Plasma IL-6 (pg/mL)", 0.0, 20.0, 5.0, 0.5, format="%.1f")
+        mdsc_count = st.sidebar.slider("Circulating MDSCs (per mL)", 0, 100, 25, 5)
+        tgfb_level = st.sidebar.slider("Serum TGF-β (ng/mL)", 0.0, 50.0, 15.0, 1.0, format="%.1f")
+        ctc_count = st.sidebar.slider("CTC Count (per mL)", 0.0, 5.0, 1.0, 0.1, format="%.1f")
+        crp_level = st.sidebar.slider("Serum CRP (mg/L)", 0.0, 20.0, 5.0, 0.5, format="%.1f")
+        ldh_level = st.sidebar.slider("Serum LDH (U/L)", 100, 300, 150, 10)
+        
+        params['custom_features'] = {
+            'ctdna_vaf_percent': ctdna_vaf,
+            'serum_hgf_pg_ml': hgf_level,
+            'plasma_il6_pg_ml': il6_level,
+            'circulating_mdsc_per_ml': mdsc_count,
+            'serum_tgfb_ng_ml': tgfb_level,
+            'ctc_count_per_ml': ctc_count,
+            'serum_crp_mg_l': crp_level,
+            'serum_ldh_u_l': ldh_level
+        }
+        
+        st.sidebar.subheader("Additional TME Features")
+        il10_level = st.sidebar.slider("Plasma IL-10 (pg/mL)", 0.0, 20.0, 6.0, 0.5, format="%.1f")
+        vegf_level = st.sidebar.slider("Plasma VEGF (pg/mL)", 0, 200, 50, 10)
+        
+        params['custom_features'].update({
+            'plasma_il10_pg_ml': il10_level,
+            'plasma_vegf_pg_ml': vegf_level
+        })
+        
+        st.sidebar.subheader("Molecular Markers")
+        params['egfr_positive'] = st.sidebar.checkbox("EGFR Mutation Positive", value=False)
+        if params['egfr_positive']:
+            params['egfr_mutation_type'] = st.sidebar.selectbox("EGFR Mutation Type", ["exon19del", "L858R", "T790M"])
+
+                # After setting params['custom_features'] with all 10, filter to the 8 expected for parameter inference
+        param_inference_features = {
+            'ctdna_vaf_percent': params['custom_features']['ctdna_vaf_percent'],
+            'serum_hgf_pg_ml': params['custom_features']['serum_hgf_pg_ml'],
+            'plasma_il6_pg_ml': params['custom_features']['plasma_il6_pg_ml'],
+            'circulating_mdsc_per_ml': params['custom_features']['circulating_mdsc_per_ml'],
+            'serum_tgfb_ng_ml': params['custom_features']['serum_tgfb_ng_ml'],
+            'ctc_count_per_ml': params['custom_features']['ctc_count_per_ml'],
+            'serum_crp_mg_l': params['custom_features']['serum_crp_mg_l'],
+            'serum_ldh_u_l': params['custom_features']['serum_ldh_u_l']
+        }
+        
+        features_df = pd.DataFrame([param_inference_features])
+        
+        if st.sidebar.button("🔍 Preview Resistance Prediction"):
+            with st.spinner("Running inference..."):
+                # Construct patient_data for resistance classifier
+                patient_data = {
+                    'tumor_burden': 1e6 * (1 + ctdna_vaf),
+                    'proliferation_rate': 0.05,
+                    'resistance_mechanism': 'Unknown',  # Will be predicted
+                    'baseline_vaf': ctdna_vaf,
+                    
+                    'cd8_density': mdsc_count * 0.5,
+                    'cd8_activation': 0.5,
+                    'cd8_tumor_distance': crp_level / 2,
+                    
+                    'm2_tam_density': mdsc_count * 0.8,
+                    'm2_activation': 0.6,
+                    'mdsc_density': mdsc_count,
+                    'mdsc_suppression': min(il10_level / 10, 1.0),
+                    'mdsc_tumor_proximity': 80,
+                    
+                    'caf_density': tgfb_level * 5,
+                    'caf_activation': min(tgfb_level / 20, 1.0),
+                    'tgf_beta': tgfb_level,
+                    
+                    'vessel_density': 150,
+                    'vascular_permeability': 0.4,
+                    'vegf_level': vegf_level / 100,
+                    
+                    'hgf_level': hgf_level,
+                    'il10_level': il10_level / 10,
+                    
+                    '0_2_strength': 0.5,
+                    '3_1_strength': min(il10_level / 50, 1.0),
+                    '4_0_strength': min(tgfb_level / 30, 1.0)
+                }
+                
+                prediction = st.session_state.resistance_classifier.predict_from_patient_data(patient_data)
+                st.sidebar.success(f"Predicted: {prediction['predicted_mechanism']} ({prediction['confidence']:.1%})")
+        
+        params['use_ctdna_prediction'] = st.sidebar.checkbox("Enable ctDNA Prediction", value=True)
+        
+        # Auto-populate from ML inference using custom features
+        try:
+            # Use only the 8 features expected by the parameter model
+            features_df = pd.DataFrame([param_inference_features])
+            
+            with torch.no_grad():
+                pred_params = st.session_state.parameter_model.predict_from_pandas(features_df)
+            
+            ml_params = pred_params.iloc[0].to_dict()
+            params.update({
+                'abc_score': ml_params['ABC'],
+                'plasticity_rate': ml_params['mu'] * 10,
+                'epigenetic_noise': ml_params['sigma2'],
+                'residual_burden': max(100, int(ctdna_vaf * 10000))
+            })
+        except Exception as e:
+            st.sidebar.warning(f"ML parameter inference failed: {e}. Using defaults.")
+    
     # Manual mode
     else:
         st.sidebar.header("🏥 Patient Configuration")
@@ -854,7 +1011,8 @@ def main():
             st.stop()
         
         if params['ml_inference'] and results.ml_inferred_params:
-            st.success(f"✅ ML-Enhanced Simulation (Patient: {params['patient_id']})")
+            patient_label = params['patient_id'] if params['patient_id'] else "Custom Patient"
+            st.success(f"✅ ML-Enhanced Simulation (Patient: {patient_label})")
             col1, col2, col3 = st.columns(3)
             with col1: st.metric("ML Confidence", f"{results.resistance_prediction['confidence']:.1%}" if results.resistance_prediction else "N/A")
             with col2: st.metric("Resistance Type", results.resistance_prediction['predicted_mechanism'] if results.resistance_prediction else "N/A")
