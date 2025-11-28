@@ -539,8 +539,8 @@ def display_user_guide():
 
     #### **Clinical Parameters**
     - **Pathologic Stage**: Cancer progression stage (IIA-IIIB)
-    - **Histology**: Tumor type (adenocarcinoma vs squamous)
-    - **Residual Tumor Burden**: Cancer cells remaining after surgery (100-10,000 cells)
+    - **Histology**: tumour type (adenocarcinoma vs squamous)
+    - **Residual tumour Burden**: Cancer cells remaining after surgery (100-10,000 cells)
 
     #### **Molecular Markers**
     - **ABC Transporter Expression**: Drug efflux pump activity (0.0-3.0)
@@ -569,7 +569,7 @@ def display_user_guide():
     - **ML Confidence**: How confident the AI predictions are
 
     #### **Visualization Tabs**
-    1. **📊 Tumor & ctDNA Dynamics**: Cell populations over time
+    1. **📊 Tumour & ctDNA Dynamics**: Cell populations over time
     2. **🧬 Epigenetic Evolution**: Resistance development
     3. **💊 Drug & ABC Kinetics**: Treatment effectiveness
     4. **📈 Resistance Fraction**: % resistant cells
@@ -585,7 +585,7 @@ def display_user_guide():
     ### **6. Understanding the Science**
 
     This simulator uses **modeling** combining:
-    - **Ordinary Differential Equations (ODEs)** for tumor growth
+    - **Ordinary Differential Equations (ODEs)** for tumour growth
     - **Neural Networks** for parameter inference from biomarkers
     - **Graph Neural Networks** for resistance mechanism classification
     - **Neural ODEs** for ctDNA dynamics prediction
@@ -601,18 +601,18 @@ def display_parameter_reference():
     ### **🎯 Clinical Parameters**
 
     #### **Pathologic Stage (IIA, IIB, IIIA, IIIB)**
-    - **What it is**: How advanced the cancer is based on tumor size, lymph node involvement, and metastasis
-    - **Impact**: Higher stages have more aggressive tumor biology and higher recurrence risk
+    - **What it is**: How advanced the cancer is based on tumour size, lymph node involvement, and metastasis
+    - **Impact**: Higher stages have more aggressive tumour biology and higher recurrence risk
     - **Default**: IIIA (common stage for adjuvant therapy)
     - **Clinical relevance**: Stage IIIA patients often receive adjuvant chemotherapy
 
     #### **Histology (Adenocarcinoma vs Squamous)**
-    - **What it is**: The microscopic appearance and cell type of the tumor
+    - **What it is**: The microscopic appearance and cell type of the tumour
     - **Impact**: Adenocarcinoma tends to be more responsive to pemetrexed, squamous to taxanes
     - **Default**: Adenocarcinoma (most common NSCLC type)
     - **Clinical relevance**: Treatment selection and prognosis differ by histology
 
-    #### **Residual Tumor Burden (100-10,000 cells)**
+    #### **Residual Tumour Burden (100-10,000 cells)**
     - **What it is**: Number of cancer cells remaining after surgery
     - **Impact**: Higher burden = faster recurrence, lower burden = longer remission
     - **Default**: 1,000 cells (typical microscopic residual disease)
@@ -639,18 +639,18 @@ def display_parameter_reference():
     ### **🧬 Epigenetic Parameters**
 
     #### **Phenotypic Plasticity Rate (μ) - 0.01 to 0.5**
-    - **What it is**: Speed at which tumor cells can switch between drug-sensitive and drug-resistant states
+    - **What it is**: Speed at which tumour cells can switch between drug-sensitive and drug-resistant states
     - **Biological mechanism**: Epigenetic changes allow cells to adapt to therapy pressure
     - **Impact**: Higher μ → faster resistance evolution → earlier recurrence
     - **Default**: 0.12 (moderate plasticity)
-    - **Clinical relevance**: High plasticity explains why some tumors recur despite good initial response
+    - **Clinical relevance**: High plasticity explains why some tumours recur despite good initial response
 
     #### **Baseline Epigenetic Instability (σ²) - 0.1 to 2.0**
     - **What it is**: Amount of non-genetic variation in gene expression and cellular behavior
     - **Biological mechanism**: Stochastic epigenetic changes create cellular heterogeneity
     - **Impact**: Higher σ² → more diverse cell populations → broader resistance mechanisms
     - **Default**: 0.5 (moderate instability)
-    - **Clinical relevance**: Epigenetic heterogeneity drives tumor evolution and treatment failure
+    - **Clinical relevance**: Epigenetic heterogeneity drives tumour evolution and treatment failure
 
     ### **💊 Treatment Protocol**
 
@@ -663,12 +663,12 @@ def display_parameter_reference():
 
     #### **Relative Dose Intensity (50-150%)**
     - **What it is**: Percentage of planned chemotherapy dose actually delivered
-    - **Impact**: Lower intensity (<80%) allows tumor regrowth, higher intensity (>120%) increases toxicity
+    - **Impact**: Lower intensity (<80%) allows tumour regrowth, higher intensity (>120%) increases toxicity
     - **Default**: 100% (full planned dose)
     - **Clinical relevance**: Dose reductions due to toxicity are common and impact outcomes
 
     #### **Simulation Duration (6-48 months)**
-    - **What it is**: How long the model simulates tumor growth and treatment
+    - **What it is**: How long the model simulates tumour growth and treatment
     - **Impact**: Longer simulations show resistance evolution and late recurrences
     - **Default**: 24 months (typical follow-up period)
     - **Clinical relevance**: Most recurrences happen within 2 years of surgery
@@ -691,15 +691,15 @@ def display_parameter_reference():
     - **Confidence**: Probability distribution across all mechanisms
 
     #### **ctDNA Prediction**
-    - **Method**: Neural ODE modeling tumor burden → ctDNA shedding
+    - **Method**: Neural ODE modeling tumour burden → ctDNA shedding
     - **Output**: Predicted ctDNA VAF over time with uncertainty bounds
     - **Clinical utility**: Early detection of recurrence before imaging
 
     ### **📊 Understanding Output Plots**
 
-    #### **Tumor Dynamics Plot**
-    - **Sensitive Cells**: Drug-responsive tumor cells (blue line)
-    - **Resistant Cells**: Drug-resistant tumor cells (red line)
+    #### **tumour Dynamics Plot**
+    - **Sensitive Cells**: Drug-responsive tumour cells (blue line)
+    - **Resistant Cells**: Drug-resistant tumour cells (red line)
     - **Total Burden**: Sum of both populations (green line)
     - **Clinical Recurrence Threshold**: 100 million cells (dashed red line)
 
@@ -711,15 +711,15 @@ def display_parameter_reference():
     #### **Drug & ABC Kinetics**
     - **Drug Concentration**: Chemotherapy levels over time
     - **ABC Expression**: Adaptive upregulation of efflux pumps
-    - Shows how tumors develop resistance through increased drug export
+    - Shows how tumours develop resistance through increased drug export
 
     #### **Resistance Fraction**
-    - Percentage of tumor cells that are drug-resistant
+    - Percentage of tumour cells that are drug-resistant
     - Starts low, increases as sensitive cells are killed
     - Key metric for treatment effectiveness
 
     #### **ctDNA Prediction**
-    - Predicted circulating tumor DNA levels
+    - Predicted circulating tumour DNA levels
     - Early warning signal for recurrence
     - Uncertainty bounds show prediction confidence
     """)
@@ -728,11 +728,11 @@ def display_parameter_reference():
 # MAIN UI LOGIC
 # ============================================================================
 def main():
-    st.title("🔬 NSCLC Tumor Resistance & Recurrence Predictor")
+    st.title("🔬 NSCLC tumour Resistance & Recurrence Predictor")
     st.markdown("""**Mechanistic modeling + Machine Learning for patient-specific resistance prediction**  
                 The goal is to act as an early detection system for drug resistance and clinical recurrence in NSCLC patients undergoing chemotherapy or targeted therapy.
                 This allows clinical teams to proactively adjust treatment strategies before overt relapse occurs.
-                Through our research we found this was possible through tracking tumor dynamics, ATP-binding cassette (ABC) transporters, ctDNA levels, and tumor microenvironment features over time and using a simple neural network to infer hidden parameters driving resistance evolution. It is also possible to monitor and model tumor growth patterns using ordinary differential equations (ODEs) that capture key biological processes such as phenotypic plasticity and drug efflux via ABC transporters.""")
+                Through our research we found this was possible through tracking tumour dynamics, ATP-binding cassette (ABC) transporters, ctDNA levels, and tumour microenvironment features over time and using a simple neural network to infer hidden parameters driving resistance evolution. It is also possible to monitor and model tumour growth patterns using ordinary differential equations (ODEs) that capture key biological processes such as phenotypic plasticity and drug efflux via ABC transporters.""")
     
     # Add comprehensive user guide
     with st.expander("📖 **USER GUIDE: How to Use This Simulator**", expanded=False):
@@ -784,7 +784,7 @@ def main():
             with st.spinner("Running inference..."):
                 # Build complete patient data structure for ML model
                 patient_data = {
-                    # Tumor features from ctDNA data
+                    # tumour features from ctDNA data
                     'tumor_burden': 1e6 * (1 + patient_ctdna['ctdna_vaf_percent']),
                     'proliferation_rate': 0.05,
                     'resistance_mechanism': patient_tme['resistance_mechanism'],
