@@ -116,7 +116,7 @@ def run_simulation_cached(params: dict) -> SimulationResults:
         params: Dictionary containing all simulation parameters
     
     Returns:
-        SimulationResults dataclass with tumor dynamics and optional ML predictions
+        SimulationResults dataclass with tumour dynamics and optional ML predictions
     """
     # Unpack parameters
     residual_burden = params['residual_burden']
@@ -155,20 +155,20 @@ def run_simulation_cached(params: dict) -> SimulationResults:
                     'serum_ldh_u_l': params['custom_features']['serum_ldh_u_l']
                 }])
                 patient_data = {
-                    'tumor_burden': 1e6 * (1 + params['custom_features']['ctdna_vaf_percent']),
+                    'tumour_burden': 1e6 * (1 + params['custom_features']['ctdna_vaf_percent']),
                     'proliferation_rate': 0.05,
                     'resistance_mechanism': 'Unknown',
                     'baseline_vaf': params['custom_features']['ctdna_vaf_percent'],
                     
                     'cd8_density': params['custom_features']['circulating_mdsc_per_ml'] * 0.5,
                     'cd8_activation': 0.5,
-                    'cd8_tumor_distance': params['custom_features']['serum_crp_mg_l'] / 2,
+                    'cd8_tumour_distance': params['custom_features']['serum_crp_mg_l'] / 2,
                     
                     'm2_tam_density': params['custom_features']['circulating_mdsc_per_ml'] * 0.8,
                     'm2_activation': 0.6,
                     'mdsc_density': params['custom_features']['circulating_mdsc_per_ml'],
                     'mdsc_suppression': min(params['custom_features']['plasma_il10_pg_ml'] / 10, 1.0),
-                    'mdsc_tumor_proximity': 80,
+                    'mdsc_tumour_proximity': 80,
                     
                     'caf_density': params['custom_features']['serum_tgfb_ng_ml'] * 5,
                     'caf_activation': min(params['custom_features']['serum_tgfb_ng_ml'] / 20, 1.0),
@@ -310,18 +310,18 @@ def run_simulation_cached(params: dict) -> SimulationResults:
         
         # ctDNA prediction
         if use_ctdna and st.session_state.ml_models_loaded:
-            tumor_burden = results.sensitive_cells + results.resistant_cells
-            tumor_rate = np.gradient(tumor_burden, t_eval)
-            clone_fraction = results.resistant_cells / np.maximum(tumor_burden, 1)
+            tumour_burden = results.sensitive_cells + results.resistant_cells
+            tumour_rate = np.gradient(tumour_burden, t_eval)
+            clone_fraction = results.resistant_cells / np.maximum(tumour_burden, 1)
             
             initial_ctdna = ml_inferred_params.get('baseline_ctdna', 0.001) if ml_inferred_params else 0.001
-            tumor_tensor = torch.tensor([[b, r, f] for b, r, f in zip(tumor_burden, tumor_rate, clone_fraction)], dtype=torch.float32)
+            tumour_tensor = torch.tensor([[b, r, f] for b, r, f in zip(tumour_burden, tumour_rate, clone_fraction)], dtype=torch.float32)
             time_tensor = torch.tensor(t_eval, dtype=torch.float32)
             
             with torch.no_grad():
-                ctDNA_pred = st.session_state.ctdna_model.simulate(initial_ctdna, tumor_tensor, time_tensor)
+                ctDNA_pred = st.session_state.ctdna_model.simulate(initial_ctdna, tumour_tensor, time_tensor)
             
-            results.ctdna_vaf = (ctDNA_pred.numpy() / (tumor_burden / 1000)) * 100
+            results.ctdna_vaf = (ctDNA_pred.numpy() / (tumour_burden / 1000)) * 100
             results.ctdna_uncertainty = results.ctdna_vaf * 0.15  # 15% CV
             
     except Exception as e:
@@ -541,6 +541,8 @@ def display_user_guide():
     - **Pathologic Stage**: Cancer progression stage (IIA-IIIB)
     - **Histology**: tumour type (adenocarcinoma vs squamous)
     - **Residual tumour Burden**: Cancer cells remaining after surgery (100-10,000 cells)
+    - **Histology**: tumour type (adenocarcinoma vs squamous)
+    - **Residual tumour Burden**: Cancer cells remaining after surgery (100-10,000 cells)
 
     #### **Molecular Markers**
     - **ABC Transporter Expression**: Drug efflux pump activity (0.0-3.0)
@@ -586,6 +588,7 @@ def display_user_guide():
 
     This simulator uses **modeling** combining:
     - **Ordinary Differential Equations (ODEs)** for tumour growth
+    - **Ordinary Differential Equations (ODEs)** for tumour growth
     - **Neural Networks** for parameter inference from biomarkers
     - **Graph Neural Networks** for resistance mechanism classification
     - **Neural ODEs** for ctDNA dynamics prediction
@@ -603,10 +606,13 @@ def display_parameter_reference():
     #### **Pathologic Stage (IIA, IIB, IIIA, IIIB)**
     - **What it is**: How advanced the cancer is based on tumour size, lymph node involvement, and metastasis
     - **Impact**: Higher stages have more aggressive tumour biology and higher recurrence risk
+    - **What it is**: How advanced the cancer is based on tumour size, lymph node involvement, and metastasis
+    - **Impact**: Higher stages have more aggressive tumour biology and higher recurrence risk
     - **Default**: IIIA (common stage for adjuvant therapy)
     - **Clinical relevance**: Stage IIIA patients often receive adjuvant chemotherapy
 
     #### **Histology (Adenocarcinoma vs Squamous)**
+    - **What it is**: The microscopic appearance and cell type of the tumour
     - **What it is**: The microscopic appearance and cell type of the tumour
     - **Impact**: Adenocarcinoma tends to be more responsive to pemetrexed, squamous to taxanes
     - **Default**: Adenocarcinoma (most common NSCLC type)
@@ -640,9 +646,11 @@ def display_parameter_reference():
 
     #### **Phenotypic Plasticity Rate (μ) - 0.01 to 0.5**
     - **What it is**: Speed at which tumour cells can switch between drug-sensitive and drug-resistant states
+    - **What it is**: Speed at which tumour cells can switch between drug-sensitive and drug-resistant states
     - **Biological mechanism**: Epigenetic changes allow cells to adapt to therapy pressure
     - **Impact**: Higher μ → faster resistance evolution → earlier recurrence
     - **Default**: 0.12 (moderate plasticity)
+    - **Clinical relevance**: High plasticity explains why some tumours recur despite good initial response
     - **Clinical relevance**: High plasticity explains why some tumours recur despite good initial response
 
     #### **Baseline Epigenetic Instability (σ²) - 0.1 to 2.0**
@@ -650,6 +658,7 @@ def display_parameter_reference():
     - **Biological mechanism**: Stochastic epigenetic changes create cellular heterogeneity
     - **Impact**: Higher σ² → more diverse cell populations → broader resistance mechanisms
     - **Default**: 0.5 (moderate instability)
+    - **Clinical relevance**: Epigenetic heterogeneity drives tumour evolution and treatment failure
     - **Clinical relevance**: Epigenetic heterogeneity drives tumour evolution and treatment failure
 
     ### **💊 Treatment Protocol**
@@ -664,10 +673,12 @@ def display_parameter_reference():
     #### **Relative Dose Intensity (50-150%)**
     - **What it is**: Percentage of planned chemotherapy dose actually delivered
     - **Impact**: Lower intensity (<80%) allows tumour regrowth, higher intensity (>120%) increases toxicity
+    - **Impact**: Lower intensity (<80%) allows tumour regrowth, higher intensity (>120%) increases toxicity
     - **Default**: 100% (full planned dose)
     - **Clinical relevance**: Dose reductions due to toxicity are common and impact outcomes
 
     #### **Simulation Duration (6-48 months)**
+    - **What it is**: How long the model simulates tumour growth and treatment
     - **What it is**: How long the model simulates tumour growth and treatment
     - **Impact**: Longer simulations show resistance evolution and late recurrences
     - **Default**: 24 months (typical follow-up period)
@@ -692,11 +703,15 @@ def display_parameter_reference():
 
     #### **ctDNA Prediction**
     - **Method**: Neural ODE modeling tumour burden → ctDNA shedding
+    - **Method**: Neural ODE modeling tumour burden → ctDNA shedding
     - **Output**: Predicted ctDNA VAF over time with uncertainty bounds
     - **Clinical utility**: Early detection of recurrence before imaging
 
     ### **📊 Understanding Output Plots**
 
+    #### **tumour Dynamics Plot**
+    - **Sensitive Cells**: Drug-responsive tumour cells (blue line)
+    - **Resistant Cells**: Drug-resistant tumour cells (red line)
     #### **tumour Dynamics Plot**
     - **Sensitive Cells**: Drug-responsive tumour cells (blue line)
     - **Resistant Cells**: Drug-resistant tumour cells (red line)
@@ -712,13 +727,16 @@ def display_parameter_reference():
     - **Drug Concentration**: Chemotherapy levels over time
     - **ABC Expression**: Adaptive upregulation of efflux pumps
     - Shows how tumours develop resistance through increased drug export
+    - Shows how tumours develop resistance through increased drug export
 
     #### **Resistance Fraction**
+    - Percentage of tumour cells that are drug-resistant
     - Percentage of tumour cells that are drug-resistant
     - Starts low, increases as sensitive cells are killed
     - Key metric for treatment effectiveness
 
     #### **ctDNA Prediction**
+    - Predicted circulating tumour DNA levels
     - Predicted circulating tumour DNA levels
     - Early warning signal for recurrence
     - Uncertainty bounds show prediction confidence
@@ -729,11 +747,12 @@ def display_parameter_reference():
 # ============================================================================
 def main():
     st.title("🔬 NSCLC tumour Resistance & Recurrence Predictor")
+    st.title("🔬 NSCLC tumour Resistance & Recurrence Predictor")
     st.markdown("""**Mechanistic modeling + Machine Learning for patient-specific resistance prediction**  
                 The goal is to act as an early detection system for drug resistance and clinical recurrence in NSCLC patients undergoing chemotherapy or targeted therapy.
                 This allows clinical teams to proactively adjust treatment strategies before overt relapse occurs.
                 Through our research we found this was possible through tracking tumour dynamics, ATP-binding cassette (ABC) transporters, ctDNA levels, and tumour microenvironment features over time and using a simple neural network to infer hidden parameters driving resistance evolution. It is also possible to monitor and model tumour growth patterns using ordinary differential equations (ODEs) that capture key biological processes such as phenotypic plasticity and drug efflux via ABC transporters.""")
-    
+
     # Add comprehensive user guide
     with st.expander("📖 **USER GUIDE: How to Use This Simulator**", expanded=False):
         display_user_guide()
@@ -793,19 +812,19 @@ def main():
                     # Immune features (approximated from available data)
                     'cd8_density': patient_tme.get('circulating_mdsc_per_ml', 100) * 0.5,
                     'cd8_activation': 0.5,
-                    'cd8_tumor_distance': patient_tme.get('serum_crp_mg_l', 50) / 2,
+                    'cd8_tumour_distance': patient_tme.get('serum_crp_mg_l', 50) / 2,
                     
                     # Myeloid features
                     'm2_tam_density': patient_tme.get('circulating_mdsc_per_ml', 50) * 0.8,
                     'm2_activation': 0.6,
                     'mdsc_density': patient_tme['circulating_mdsc_per_ml'],
                     'mdsc_suppression': min(patient_tme['plasma_il10_pg_ml'] / 10, 1.0),
-                    'mdsc_tumor_proximity': 80,
+                    'mdsc_tumour_proximity': 80,
                     
                     # Stromal features
                     'caf_density': patient_tme.get('serum_tgfb_ng_ml', 10) * 5,
                     'caf_activation': min(patient_tme['serum_tgfb_ng_ml'] / 20, 1.0),
-                    'caf_tumor_proximity': 30,
+                    'caf_tumour_proximity': 30,
                     
                     # Vascular features
                     'vessel_density': 150,
@@ -912,20 +931,20 @@ def main():
                 with st.spinner("Running inference..."):
                     # Construct patient_data for resistance classifier
                     patient_data = {
-                        'tumor_burden': 1e6 * (1 + ctdna_vaf),
+                        'tumour_burden': 1e6 * (1 + ctdna_vaf),
                         'proliferation_rate': 0.05,
                         'resistance_mechanism': 'Unknown',  # Will be predicted
                         'baseline_vaf': ctdna_vaf,
                         
                         'cd8_density': mdsc_count * 0.5,
                         'cd8_activation': 0.5,
-                        'cd8_tumor_distance': crp_level / 2,
+                        'cd8_tumour_distance': crp_level / 2,
                         
                         'm2_tam_density': mdsc_count * 0.8,
                         'm2_activation': 0.6,
                         'mdsc_density': mdsc_count,
                         'mdsc_suppression': min(il10_level / 10, 1.0),
-                        'mdsc_tumor_proximity': 80,
+                        'mdsc_tumour_proximity': 80,
                         
                         'caf_density': tgfb_level * 5,
                         'caf_activation': min(tgfb_level / 20, 1.0),
@@ -975,7 +994,7 @@ def main():
         
         params['stage'] = st.sidebar.selectbox("Pathologic Stage", ["IIA", "IIB", "IIIA", "IIIB"], index=2)
         params['histology'] = st.sidebar.selectbox("Histology", ["adenocarcinoma", "squamous"])
-        params['residual_burden'] = st.sidebar.slider("Residual Tumor Burden (cells)", 100, 10000, 1000, 100)
+        params['residual_burden'] = st.sidebar.slider("Residual tumour Burden (cells)", 100, 10000, 1000, 100)
         
         st.sidebar.subheader("Molecular Markers")
         params['abc_score'] = st.sidebar.slider("ABC Transporter Expression", 0.0, 3.0, 1.0, 0.1, format="%.1f")
