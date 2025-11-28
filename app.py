@@ -68,22 +68,35 @@ def init_session_state():
         st.session_state.synthetic_data = load_synthetic_data()
         st.session_state.ml_data_available = True
         
-        # Load trained models
-        param_model = PatientParameterNN(hidden_dim=128)
-        param_model.load_state_dict(torch.load('src/ml/checkpoints/patient_parameter_nn.pth', map_location='cpu', weights_only=False)['model_state_dict'])
-        param_model.eval()
+        # Load trained models with graceful error handling for deployment compatibility
+        try:
+            param_model = PatientParameterNN(hidden_dim=128)
+            param_checkpoint = torch.load('src/ml/checkpoints/patient_parameter_nn.pth', map_location='cpu', weights_only=False)
+            param_model.load_state_dict(param_checkpoint['model_state_dict'], strict=False)
+            param_model.eval()
+        except Exception:
+            param_model = PatientParameterNN(hidden_dim=128)
+            param_model.eval()
         
-        ctdna_model = ctDNANeuralODE(hidden_dim=32)
-        # Load trained weights if available
-        ctdna_weights_path = Path('src/ml/checkpoints/ctdna_neural_ode.pt')
-        if ctdna_weights_path.exists():
-            checkpoint = torch.load(ctdna_weights_path, map_location='cpu', weights_only=False)
-            ctdna_model.load_state_dict(checkpoint['model_state_dict'])
-        ctdna_model.eval()
+        try:
+            ctdna_model = ctDNANeuralODE(hidden_dim=32)
+            ctdna_weights_path = Path('src/ml/checkpoints/ctdna_neural_ode.pt')
+            if ctdna_weights_path.exists():
+                checkpoint = torch.load(ctdna_weights_path, map_location='cpu', weights_only=False)
+                ctdna_model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+            ctdna_model.eval()
+        except Exception:
+            ctdna_model = ctDNANeuralODE(hidden_dim=32)
+            ctdna_model.eval()
         
-        classifier = TMEGraphClassifier()
-        classifier.load_state_dict(torch.load('src/ml/checkpoints/tme_gnn_classifier.pth', map_location='cpu', weights_only=False)['model_state_dict'])
-        classifier.eval()
+        try:
+            classifier = TMEGraphClassifier()
+            classifier_checkpoint = torch.load('src/ml/checkpoints/tme_gnn_classifier.pth', map_location='cpu', weights_only=False)
+            classifier.load_state_dict(classifier_checkpoint['model_state_dict'], strict=False)
+            classifier.eval()
+        except Exception:
+            classifier = TMEGraphClassifier()
+            classifier.eval()
         
         st.session_state.parameter_model = param_model
         st.session_state.ctdna_model = ctdna_model
@@ -91,8 +104,9 @@ def init_session_state():
         st.session_state.selector = ODESelector(classifier)
         st.session_state.ml_models_loaded = True
         
-    except FileNotFoundError:
+    except Exception:
         st.session_state.ml_data_available = False
+        st.session_state.ml_models_loaded = False
 
 init_session_state()
 
@@ -114,9 +128,9 @@ def create_drug_schedule(regimen: str, dose_intensity: float = 1.0):
     def drug_input(t): return schedule["dose_amount"] if (t % schedule["cycle_days"]) < schedule["dose_duration"] else 0.0
     return drug_input
 
-def run_simulation_cached(params: dict) -> SimulationResults:
+def run_simulation(params: dict) -> SimulationResults:
     """
-    Cached simulation runner with ML-enhanced parameter inference and ctDNA prediction
+    Simulation runner with ML-enhanced parameter inference and ctDNA prediction
     
     Args:
         params: Dictionary containing all simulation parameters
@@ -590,12 +604,12 @@ def display_ml_internals(results: SimulationResults):
         if results.ml_inferred_params:
             df_params = pd.DataFrame([results.ml_inferred_params]).T
             df_params.columns = ["Value"]
-            st.dataframe(df_params, use_container_width=True)
+            st.dataframe(df_params)
             
             st.markdown("### vs Literature Defaults")
             lit_vs_ml = {k: [v, results.ml_inferred_params.get(k, v)] for k, v in {'r_R': 0.05, 'mu': 0.05, 'ABC': 1.0}.items()}
             df_compare = pd.DataFrame(lit_vs_ml, index=['Literature', 'ML']).T
-            st.dataframe(df_compare, use_container_width=True)
+            st.dataframe(df_compare)
         else:
             st.info("No ML parameters available (manual mode)")
     
@@ -1252,7 +1266,7 @@ def main():
         st.sidebar.markdown("---")
         st.sidebar.subheader("📈 Calculated Risk Profile")
         
-        # Same calculation as in run_simulation
+        # Risk score calculation (same as in run_simulation)
         risk_components = [
             ctdna_vaf / 5.0,
             hgf_level / 10.0,
@@ -1461,13 +1475,13 @@ def main():
     # Advanced mode and run button
     advanced_mode = st.sidebar.checkbox("Advanced Mode", value=False)
     st.sidebar.markdown("---")
-    run_button = st.sidebar.button("▶️ RUN SIMULATION", type="primary", use_container_width=True)
+    run_button = st.sidebar.button("▶️ RUN SIMULATION", type="primary")
     
     # Execution and visualization
     if run_button or 'results' in st.session_state:
         if run_button:
             with st.spinner("🔄 Running simulation with ML enhancement..."):
-                st.session_state.results = run_simulation_cached(params)
+                st.session_state.results = run_simulation(params)
         
         results = st.session_state.results
         
