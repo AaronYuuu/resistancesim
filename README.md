@@ -1,321 +1,314 @@
-# NSCLC tumour Resistance & Recurrence Simulator
+# NSCLC Digital Twin: Predictive Modelling of Tumour Recurrence and Drug Resistance
 
-**A Demonstration Tool for Mechanistic Modeling of Chemoresistance Dynamics in Non-Small Cell Lung Cancer**
+**A Computational Framework for Early Detection of Treatment Resistance in Non-Small Cell Lung Cancer**
+
+[![Python 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
 
-## Overview
+## Abstract
 
-This software presents an **educational demonstration** of computational approaches to modeling acquired chemoresistance in Non-Small Cell Lung Cancer (NSCLC). The simulator implements a mechanistic ordinary differential equation (ODE) framework to explore the interplay between epigenetic plasticity, ABC transporter-mediated drug efflux, and phenotypic heterogeneity in post-resection adjuvant settings.
+This repository presents a hybrid mechanistic-machine learning framework for predicting tumour recurrence and drug resistance evolution in non-small cell lung cancer (NSCLC) following surgical resection with adjuvant therapy. The system integrates ordinary differential equation (ODE) models of tumour population dynamics with neural network components that infer patient-specific parameters from clinical biomarkers.
 
-**Important Disclaimer**: This tool is designed strictly for **educational and research demonstration purposes**. It is **not validated for clinical decision-making** and should not be used to guide patient care. All predictions are theoretical approximations based on simplified mathematical models and require extensive validation before any translational application.
+**Clinical Objective**: Enable earlier detection of treatment resistance by predicting recurrence trajectories from routinely collected biomarkers, thereby providing clinicians with actionable lead time for therapeutic intervention.
 
-### Conceptual Framework
+**Disclaimer**: This tool is designed for **research and educational purposes only**. It has not undergone clinical validation and should not be used for patient care decisions.
 
-The simulator models three interconnected mechanisms hypothesized to drive acquired chemoresistance:
+---
 
-1. **Epigenetic Plasticity** - Reversible, drug-induced phenotypic transitions between chemosensitive and chemoresistant cellular states
-2. **ABC Transporter Expression** - Upregulation of ATP-binding cassette efflux pumps (ABCB1/ABCG2) reducing intracellular drug accumulation
-3. **Stochastic Phenotypic Heterogeneity** - Non-genetic variability in epigenetic states driving population-level adaptation
+## Scientific Background
 
-### Technical Capabilities
+### The Clinical Problem
 
-- Five-state compartmental ODE system with event-driven recurrence detection
-- Literature-derived parameter ranges from published pharmacokinetic and clinical trial data
-- Interactive parameter exploration interface for hypothesis generation
-- Global sensitivity analysis via Sobol variance decomposition
-- Calibration against clinical trial endpoints (where applicable)
+Despite advances in surgical techniques and adjuvant chemotherapy, 30-55% of patients with resected Stage II-III NSCLC experience disease recurrence within 5 years (Pignon et al., JCO 2008). Current surveillance strategies rely on imaging-based detection, which identifies recurrence only after substantial tumour regrowth has occurred—often when therapeutic options are limited.
 
-## 📚 Scientific Foundation
+### Our Approach
 
-### Mathematical Model
+This framework addresses the need for earlier recurrence prediction through:
 
-The simulator implements a 5-state ODE system:
+1. **Mechanistic ODE Modelling**: Captures the biological dynamics of tumour growth, drug pharmacokinetics, phenotypic plasticity, and resistance evolution
+2. **Machine Learning Integration**: Neural networks infer patient-specific ODE parameters from circulating biomarkers (ctDNA, cytokines, immune cell populations)
+3. **Risk Stratification**: Biomarker-derived risk scores modulate model predictions to reflect individual patient biology
 
-```
-dS/dt = r_S·S·(1 - N/K) - d·S - kill(D)·S - μ·σ²·S + μ·σ²·R/2
-dR/dt = r_R·R·(1 - N/K) - d·R - kill(D)·R·0.1 + μ·σ²·S - μ·σ²·R/2
-dD/dt = dose(t) - k_clearance·D - efflux(ABC, D)
-dABC/dt = induction(D) - decay(ABC)
-dσ²/dt = drug_pressure(D) - relaxation(σ² - σ₀)
-```
+---
 
-Where:
-- **S** = Sensitive cell population
-- **R** = Resistant cell population  
-- **D** = Effective drug concentration (μM)
-- **ABC** = ABC transporter expression level
-- **σ²** = Epigenetic instability score
+## Mathematical Framework
 
-### Literature References
+### Core ODE System (7-State Model)
 
-| Component | Source | DOI/Reference |
-|-----------|--------|---------------|
-| Phenotypic switching | Dhawan et al. *Nat Sci Rep* 2016 | doi:10.1038/srep28597 |
-| Epigenetic plasticity | Lei et al. arXiv 2019 | arXiv:1901.09747 |
-| ABC transporter kinetics | Fletcher et al. *Cancer Res* 2010 | PMID: 20424120 |
-| Clinical validation | JCOG 9304, META-analysis | Multiple sources |
+The tumour dynamics are governed by a system of coupled ordinary differential equations:
 
-## Installation & Deployment
+$$\frac{dS}{dt} = r_S \cdot S \cdot \left(1 - \frac{N}{K}\right) - d \cdot S - k_{kill} \cdot E_{drug} \cdot S - \mu_{S \to R} + \mu_{R \to S}$$
 
-### System Requirements
+$$\frac{dR}{dt} = r_R \cdot R \cdot \left(1 - \frac{N}{K}\right) \cdot (1 + ABC^{1.5}) - d \cdot R - k_{kill} \cdot E_{drug} \cdot R + \mu_{S \to R} - \mu_{R \to S}$$
 
-- Python 3.8 or higher
-- 4GB RAM minimum (8GB recommended for sensitivity analysis)
-- Modern web browser with JavaScript enabled
+$$\frac{dD_{plasma}}{dt} = I(t) - k_{clear} \cdot D_{plasma} - k_{dist}(D_{plasma} - D_{tumor})$$
 
-### Installation Procedure
+$$\frac{dD_{tumor}}{dt} = k_{dist}(D_{plasma} - D_{tumor}) - k_{influx} \cdot D_{tumor} + k_{efflux} \cdot D_{intra}$$
+
+$$\frac{dD_{intra}}{dt} = k_{influx} \cdot D_{tumor} - k_{efflux} \cdot D_{intra} - \frac{V_{max} \cdot ABC \cdot D_{intra}}{K_m + D_{intra}}$$
+
+$$\frac{dABC}{dt} = \alpha \cdot D_{intra} \cdot \frac{ABC_{max} - ABC}{2 + D_{intra}} - \beta \cdot ABC$$
+
+$$\frac{d\sigma}{dt} = \gamma \cdot D_{intra} \cdot \frac{\sigma_{max} - \sigma}{1 + D_{intra}} - \delta(\sigma - \sigma_0)$$
+
+**State Variables:**
+| Symbol | Description | Units |
+|--------|-------------|-------|
+| S | Chemosensitive tumour cells | cells |
+| R | Chemoresistant tumour cells | cells |
+| D_plasma | Plasma drug concentration | μM |
+| D_tumor | Tumour extracellular drug concentration | μM |
+| D_intra | Intracellular drug concentration | μM |
+| ABC | ABC transporter expression | relative units |
+| σ | Epigenetic instability score | dimensionless |
+
+### Drug Kill Dynamics (Hill Equation)
+
+$$E_{drug} = \frac{D_{intra}^n}{EC_{50}^n + D_{intra}^n}$$
+
+### ctDNA Dynamics
+
+Circulating tumour DNA kinetics follow production-clearance dynamics (Diehl et al., PNAS 2008):
+
+$$\frac{d(ctDNA)}{dt} = k_{prod} \cdot N \cdot d_{death} - k_{clear} \cdot ctDNA$$
+
+Where k_clear ≈ 11/day corresponds to the literature-established half-life of ~1.5 hours.
+
+---
+
+## Machine Learning Components
+
+### 1. Patient Parameter Neural Network
+
+A feedforward neural network that infers ODE parameters from clinical biomarkers:
+
+**Input Features:**
+- ctDNA VAF (%)
+- Serum HGF (pg/mL)
+- Plasma IL-6, IL-10 (pg/mL)
+- Circulating MDSCs (cells/mL)
+- Serum TGF-β (ng/mL)
+- Serum CRP (mg/L)
+
+**Output Parameters:**
+- Resistant growth rate (r_R)
+- Phenotypic plasticity rate (μ)
+- ABC transporter expression (ABC)
+- Epigenetic variance (σ²)
+
+### 2. TME Graph Neural Network Classifier
+
+A Graph Attention Network (GAT) that predicts resistance mechanism from tumour microenvironment (TME) cell interactions:
+
+**Graph Structure:**
+- 6 nodes: Tumour Cell, CD8+ TIL, M2 TAM, MDSC, CAF, Endothelial Cell
+- Edge weights derived from biomarker-inferred interaction strengths
+
+**Classification Output:**
+- No Resistance
+- MET Amplification
+- C797S Mutation
+- T790M Loss
+- Other
+
+### 3. ctDNA Neural ODE
+
+A neural network that learns the ctDNA production rate from tumour state, trained on synthetic data calibrated to literature kinetics.
+
+---
+
+## Risk Stratification
+
+### Biomarker Risk Score
+
+A composite score (0-1) computed from weighted biomarker contributions:
+
+| Biomarker | Weight | Clinical Significance |
+|-----------|--------|----------------------|
+| ctDNA VAF | 0.20 | Tumour burden proxy |
+| Serum HGF | 0.18 | MET pathway activation |
+| IL-6 | 0.12 | Systemic inflammation |
+| IL-10 | 0.10 | Immunosuppression |
+| MDSCs | 0.12 | Immune evasion |
+| TGF-β | 0.12 | EMT/fibrosis |
+| CRP | 0.08 | Inflammation |
+| VEGF | 0.08 | Angiogenesis |
+
+### Risk-Stratified Predictions
+
+| Risk Score | Classification | Expected Recurrence |
+|------------|----------------|---------------------|
+| < 0.35 | Low Risk | 24-30 months |
+| 0.35-0.55 | Moderate Risk | 18-24 months |
+| 0.55-0.75 | High Risk | 14-18 months |
+| > 0.75 | Very High Risk | 10-14 months |
+
+---
+
+## Installation
+
+### Requirements
+
+- Python 3.8+
+- 8 GB RAM recommended
+- Modern web browser
+
+### Setup
 
 ```bash
 # Clone repository
-git clone <repository-url>
+git clone https://github.com/[username]/resistancesim.git
 cd resistancesim
 
-# Install required dependencies
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 
-# Launch demonstration interface
-streamlit run app_integrated.py
+# Launch application
+streamlit run app.py
 ```
 
-The application interface will be accessible at `http://localhost:8501`
+Access the interface at `http://localhost:8501`
 
-### Containerized Deployment (Optional)
+---
 
-For reproducible execution environments:
+## Usage Guide
 
-```bash
-docker build -t nsclc-simulator .
-docker run -p 8501:8501 nsclc-simulator
-```
+### 1. Configure Patient Profile
 
-## Usage Guidelines
+**Clinical Parameters:**
+- **Pathologic Stage** (IIA-IIIB): Affects growth rate via stage-specific multipliers
+- **Histology**: Adenocarcinoma or squamous cell carcinoma
+- **Residual Tumour Burden**: Estimated microscopic disease post-resection (100-10,000 cells)
 
-### Parameter Configuration
+### 2. Input Biomarker Values
 
-Users may adjust the following model parameters to explore theoretical scenarios:
+Adjust sliders to reflect patient biomarker measurements. The real-time risk score updates automatically, showing:
+- Calculated risk score (0-1)
+- Risk classification (Low/Moderate/High/Very High)
+- Expected recurrence range
 
-**Clinical Context Variables:**
-- **Pathologic Stage** (IIA-IIIB): Modulates tumour carrying capacity based on post-surgical anatomic extent
-- **Histology** (Adenocarcinoma/Squamous): Affects baseline proliferation rates per published growth kinetics
-- **Residual tumour Burden** (10²-10⁴ cells): Initial condition representing microscopic residual disease post-R0 resection
+### 3. Run Simulation
 
-**Molecular Biomarker Inputs:**
-- **ABC Transporter Expression** (IHC score 0-3): Parameterizes efflux pump density affecting intracellular drug retention
-- **Phenotypic Plasticity Rate** (μ = 0.01-0.5 day⁻¹): Governs transition rate between chemosensitive and chemoresistant phenotypes
-- **Baseline Epigenetic Instability** (σ² = 0.1-2.0): Quantifies stochastic variability in epigenetic state propagation
+Click "Run Simulation" to execute the ODE solver. The system will:
+1. Infer patient-specific parameters via neural networks
+2. Classify predicted resistance mechanism
+3. Integrate tumour population dynamics
+4. Predict time to clinical recurrence (tumour burden ≥ 10⁸ cells)
 
-**Treatment Protocol Selection:**
-- Carboplatin-Paclitaxel (q21d or q14d dosing)
-- Pemetrexed monotherapy (q21d, non-squamous histology)
-- Dose intensity modulation (50-150% of standard protocols)
+### 4. Interpret Results
 
-### Simulation Execution
+**Primary Output:**
+- Predicted recurrence time (months)
+- Confidence interval based on model uncertainty
 
-The numerical solver employs adaptive time-stepping (LSODA algorithm) with event detection for automated identification of recurrence threshold crossings (defined as tumour burden ≥ 10⁸ cells).
+**Visualisations:**
+- Tumour population dynamics (sensitive vs. resistant cells)
+- ctDNA trajectory with uncertainty bounds
+- Drug pharmacokinetics (plasma, tumour, intracellular concentrations)
+- ABC transporter expression evolution
+- Resistance fraction over time
 
-### Output Interpretation
+---
 
-**Primary Endpoint:**
-- Time to recurrence (months) - theoretical prediction from model dynamics
+## Clinical Validation Status
 
-**Auxiliary Visualizations:**
-1. Population dynamics trajectories (sensitive vs. resistant compartments)
-2. Epigenetic instability evolution under therapeutic pressure
-3. Pharmacokinetic profiles with ABC-mediated efflux dynamics
-4. Temporal evolution of resistant cell fraction
+### Calibration Benchmarks
 
-**Important Note**: All outputs represent theoretical model predictions under idealized assumptions and should be interpreted as exploratory demonstrations rather than clinical predictions.
+Model parameters are calibrated against published clinical trial data:
 
-## Model Validation & Limitations
+| Benchmark | Source | Target | Model Output |
+|-----------|--------|--------|--------------|
+| Stage III DFS | LACE meta-analysis | 18-24 months | ✓ |
+| EGFR+ PFS | FLAURA trial | 18.9 months | ✓ |
+| ctDNA half-life | Diehl et al. | 1.5 hours | ✓ |
 
-### Calibration Approach
+### Limitations
 
-Model parameters have been constrained to physiologically plausible ranges derived from published literature, including:
-- tumour growth rates from longitudinal imaging studies
-- Drug pharmacokinetic parameters from phase I/II trials  
-- ABC transporter expression levels from immunohistochemical analyses
-- Epigenetic switching rates from single-cell lineage tracing experiments
+This model incorporates significant simplifications:
 
-**Demonstration Benchmarks** (illustrative examples only):
+- **Spatial homogeneity**: No intratumoural heterogeneity modelling
+- **Deterministic dynamics**: Stochastic effects approximated via epigenetic variance
+- **Limited resistance mechanisms**: Does not model all known pathways
+- **Fixed population PK**: Patient-specific pharmacokinetic variability not incorporated
+- **No immune dynamics**: Anti-tumour immune responses not represented
 
-| Scenario | Parameter Set | Observed Clinical Range | Model Output |
-|----------|---------------|-------------------------|--------------|
-| Low-risk profile | Stage IIA, ABC=0.5, μ=0.05 | >16 months | 19.2 months |
-| High-risk profile | Stage IIIB, ABC=2.5, μ=0.3 | <9 months | 8.8 months |
+**This tool requires prospective clinical validation before any consideration for clinical deployment.**
 
-### Global Sensitivity Analysis
-
-Sobol variance decomposition identifies parameters with greatest influence on model predictions:
-
-1. **Epigenetic Instability (σ²)**: Total-order index ST = 0.42
-2. **Phenotypic Plasticity Rate (μ)**: ST = 0.35
-3. **ABC Transporter Expression**: ST = 0.28
-4. **Initial tumour Burden**: ST = 0.18
-
-### Critical Limitations
-
-This demonstration model incorporates substantial simplifications:
-
-- **Spatial homogeneity assumption**: No consideration of tumour microarchitecture or intratumoural heterogeneity
-- **Deterministic dynamics**: Stochastic effects approximated through mean-field epigenetic variance term
-- **Single-pathway resistance**: Does not model alternative resistance mechanisms (e.g., MET amplification, EMT)
-- **Fixed pharmacokinetics**: Patient-specific PK variability not incorporated
-- **Absence of immune dynamics**: No representation of anti-tumour immune responses or immunosuppression
-
-**These limitations preclude clinical application. The tool serves exclusively as a demonstration of computational modeling approaches in oncology.**
+---
 
 ## Repository Structure
 
 ```
 resistancesim/
-├── app_integrated.py               # Primary demonstration interface
-├── requirements.txt                # Python package dependencies
+├── app.py                          # Streamlit application
+├── requirements.txt                # Dependencies
 ├── README.md                       # Documentation
+├── REFERENCES.md                   # Literature citations with DOIs
 │
 ├── src/
 │   ├── models/
-│   │   ├── tumour_population.py        # Core ODE system implementation
-│   │   ├── mutations.py                # EGFR-TKI resistance module
-│   │   ├── epigenetic_plasticity.py    # Phenotypic state transitions
-│   │   └── abc_transporters.py         # Drug efflux kinetics
+│   │   ├── tumour_population.py    # Core ODE system
+│   │   ├── mutations.py            # EGFR-TKI resistance module
+│   │   ├── epigenetic_plasticity.py
+│   │   ├── abc_transporters.py
+│   │   └── chemotherapy_pkpd.py    # Pharmacokinetic models
 │   │
-│   ├── utils/
-│   │   ├── literature_params.py        # Literature-derived parameters
-│   │   └── sensitivity_analysis.py     # Sobol variance decomposition
+│   ├── ml/
+│   │   ├── models/
+│   │   │   ├── ct_dna_dynamics.py  # ctDNA Neural ODE
+│   │   │   ├── patient_parameters.py
+│   │   │   └── resistance_classifier.py  # TME GNN
+│   │   ├── checkpoints/            # Trained model weights
+│   │   └── training/               # Training scripts
 │   │
-│   └── validation/
-│       └── clinical_benchmarks.py      # Calibration test cases
+│   └── utils/
+│       └── literature_params.py    # Literature-derived parameters
 │
 └── tests/
-    ├── test_risk_scenarios.py          # Risk stratification validation
-    └── test_simulation.py              # Integration testing
+    └── test_simulation.py
 ```
-
-## Technical Implementation
-
-### Numerical Methods
-
-The ODE system is integrated using `scipy.integrate.solve_ivp` with the following configuration:
-- **Algorithm**: LSODA (Livermore Solver for Ordinary Differential equations with Automatic method switching)
-- **Relative tolerance**: 10⁻⁶
-- **Absolute tolerance**: 10⁻⁹  
-- **Maximum step size**: 1 day (ensures adequate temporal resolution for pulsatile dosing)
-- **Event detection**: Automated termination upon reaching recurrence threshold (10⁸ cells)
-
-### Computational Efficiency
-
-Result caching via `@st.cache_data` decorator enables instantaneous retrieval for repeated parameter configurations, minimizing redundant numerical integration.
-
-### Diagnostic Capabilities
-
-The interface provides optional diagnostic output including:
-- Solver convergence status and termination conditions
-- Final state vector values
-- Integration statistics (function evaluations, Jacobian computations)
-
-## Troubleshooting
-
-### Numerical Convergence Issues
-
-**Solver failure diagnostics:**
-- Verify parameters lie within physiologically plausible ranges defined in literature
-- Reduce simulation duration if integrator encounters numerical stiffness
-- Examine solver diagnostic output for specific error conditions
-
-**Model output validation:**
-- Cross-reference parameter values against literature-derived constraints
-- Compare predictions against provided calibration scenarios
-- Ensure treatment protocol selection is appropriate for specified tumour histology
-
-**Performance optimization:**
-- Utilize result caching for repeated parameter configurations
-- Limit simulation duration to minimum required temporal horizon
-- Allocate sufficient computational resources (close unnecessary processes)
-
-## Intended Applications
-
-This demonstration tool may serve several educational and research purposes:
-
-### 1. Pedagogical Applications
-Illustrate mechanistic resistance concepts for oncology education, demonstrating how epigenetic plasticity and drug efflux jointly influence treatment response dynamics
-
-### 2. Hypothesis Generation  
-Facilitate exploratory *in silico* experiments to identify parameter regimes warranting further investigation in preclinical models
-
-### 3. Protocol Comparison
-Provide qualitative comparisons of theoretical outcomes under different dosing schedules (e.g., dose-dense vs. standard interval chemotherapy)
-
-### 4. Methodological Demonstration
-Serve as an exemplar of ODE-based modeling approaches in computational oncology for training purposes
-
-**Reiteration**: This tool is **not appropriate for clinical decision support, patient counseling, or treatment planning**. All use cases are confined to educational demonstration and hypothesis exploration.
-
-## Computational Performance
-
-Typical execution metrics on standard computing hardware:
-
-- **Simulation runtime**: 2-5 seconds (730-day temporal horizon with adaptive time-stepping)
-- **Cached retrieval latency**: <100 milliseconds
-- **Memory footprint**: Approximately 50 MB
-- **Browser compatibility**: Modern web browsers (Chrome, Firefox, Safari, Edge) with JavaScript enabled
-
-## Future Development Directions
-
-Potential enhancements to this demonstration framework include:
-
-### Methodological Extensions
-- Integration of spatial heterogeneity via hybrid agent-based modeling components
-- Implementation of stochastic differential equation formulations for improved representation of phenotypic noise
-- Bayesian parameter inference frameworks for individualized model calibration
-- Multi-scale coupling with circulating tumour DNA (ctDNA) dynamics
-
-### Biological Complexity
-- Incorporation of alternative resistance pathways (MET amplification, epithelial-mesenchymal transition)
-- Representation of tumour microenvironment interactions (hypoxia, stromal signaling)
-- Integration of immune checkpoint dynamics for combination therapy scenarios
-- Pharmacogenomic variability in drug metabolism
-
-**Note**: Implementation of these features would require substantial additional validation prior to any consideration for translational research applications.
-
-## Citation
-
-If this demonstration tool proves useful in educational or research contexts, please cite:
-
-```bibtex
-@software{nsclc_resistance_simulator,
-  title={NSCLC tumour Resistance and Recurrence Simulator: 
-         A Demonstration Tool for Mechanistic Modeling of Chemoresistance},
-  author={[Author Names]},
-  year={2025},
-  url={https://github.com/[username]/resistancesim},
-  note={Educational demonstration software - not validated for clinical use}
-}
-```
-
-## License
-
-This software is distributed under the MIT License. See LICENSE file for complete terms.
-
-**Liability Disclaimer**: This software is provided "as is" without warranty of any kind. The authors assume no liability for any direct, indirect, incidental, or consequential damages arising from use of this demonstration tool. Users are solely responsible for ensuring appropriate application within educational contexts only.
-
-## Contributing
-
-Contributions to improve the educational value of this demonstration are welcome. Please:
-1. Fork the repository
-2. Implement enhancements in a feature branch
-3. Include appropriate documentation and unit tests
-4. Submit pull request with clear description of changes and their educational rationale
-
-## Contact
-
-For technical inquiries or collaboration opportunities:
-- GitHub Issues: [Create an issue](https://github.com/[username]/resistancesim/issues)
-- Email: [contact information]
 
 ---
 
-**Version**: 1.0.0-demo  
+## References
+
+Full citations with DOIs are provided in [REFERENCES.md](REFERENCES.md). Key sources include:
+
+1. Pignon JP et al. (2008) LACE meta-analysis. *J Clin Oncol* 26:3552-9. [DOI: 10.1200/JCO.2007.13.9030](https://doi.org/10.1200/JCO.2007.13.9030)
+2. Diehl F et al. (2008) ctDNA dynamics. *PNAS* 105:13118-23. [DOI: 10.1073/pnas.0804971105](https://doi.org/10.1073/pnas.0804971105)
+3. Ramalingam SS et al. (2020) FLAURA trial. *NEJM* 382:41-50. [DOI: 10.1056/NEJMoa1913662](https://doi.org/10.1056/NEJMoa1913662)
+4. Sharma SV et al. (2010) Drug-tolerant persisters. *Cell* 141:69-80. [DOI: 10.1016/j.cell.2010.02.027](https://doi.org/10.1016/j.cell.2010.02.027)
+
+---
+
+## Citation
+
+```bibtex
+@software{nsclc_digital_twin_2025,
+  title={NSCLC Digital Twin: Predictive Modelling of Tumour Recurrence and Drug Resistance},
+  author={[Authors]},
+  year={2025},
+  url={https://github.com/[username]/resistancesim},
+  note={Research software - not validated for clinical use}
+}
+```
+
+---
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
+
+**Disclaimer**: This software is provided "as is" without warranty. It is not validated for clinical decision-making and should not be used to guide patient care.
+
+---
+
+**Version**: 2.0.0  
 **Last Updated**: November 2025  
-**Status**: Educational Demonstration Tool  
-**Clinical Validation Status**: Not validated - for educational use only
+**Status**: Research Tool

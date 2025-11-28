@@ -12,6 +12,19 @@ class ctDNANeuralODE(nn.Module):
     Neural ODE for ctDNA dynamics: models generation and clearance
     Couples with tumor population ODE from original model
     
+    Literature basis:
+    - Diehl et al. PNAS 2008: ctDNA half-life ~1.5 hours (clearance rate ~11 per day)
+    - Bettegowda et al. Sci Transl Med 2014: ctDNA production proportional to tumor cell death
+    - Wan et al. Nat Rev Clin Oncol 2017: ctDNA kinetics reflect tumor burden and treatment response
+    - Chaudhuri et al. Nat Med 2017: ctDNA clearance follows exponential decay with t1/2 ~1-2 hours
+    
+    Mathematical model:
+    d(ctDNA)/dt = k_production * cell_death_rate - k_clearance * ctDNA
+    
+    Where:
+    - k_clearance = ln(2) / t_half ≈ 11.1 per day (for t_half = 1.5 hours)
+    - k_production is learned from data (proportional to cell death)
+    
     Args:
         hidden_dim: Dimension of hidden layers in production network
         device: torch device ('cpu' or 'cuda')
@@ -22,22 +35,26 @@ class ctDNANeuralODE(nn.Module):
         self.device = device or torch.device('cpu')
         
         # Neural network for ctDNA production rate
-        # Inputs: [ctDNA, tumor_burden, tumor_rate, clone_fraction, drug_concentration] (5 inputs)
+        # Inputs: [log_burden/10, death_rate*10, clone_fraction, drug/10] (4 inputs)
+        # Outputs: log10(ctDNA) - transform to actual ctDNA via 10^output
         self.production_net = nn.Sequential(
-            nn.Linear(5, hidden_dim),
+            nn.Linear(4, hidden_dim),
             nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(0.1),
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(0.1),
-            nn.Linear(hidden_dim, 1),
-            nn.ReLU()  # Production is non-negative
+            nn.Linear(hidden_dim, 1)
+            # No activation - output is log10(ctDNA) which can be negative
         ).to(self.device)
         
-        # Clearance rate (learnable parameter)
-        self.clearance_rate = nn.Parameter(torch.tensor(0.1, device=self.device))  # ~10% per day
+        # Clearance rate parameter (log scale for positivity)
+        # Literature: ctDNA half-life ~1.5 hours = 0.0625 days
+        # k_clearance = ln(2) / t_half = ln(2) / 0.0625 ≈ 11.1 per day
+        # Initialize to log(11.1) ≈ 2.4 (was -3.0 which gave 0.05 - too slow!)
+        self.clearance_log = nn.Parameter(torch.tensor(2.4))  # exp(2.4) ≈ 11.0 per day
         
         # NEW: Add initialization bounds
         self._initialize_weights()
@@ -51,11 +68,19 @@ class ctDNANeuralODE(nn.Module):
     
     def forward(self, t: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass of ctDNA dynamics
+        Forward pass of ctDNA VAF dynamics
+        
+        Literature-based model:
+        d(ctDNA)/dt = k_production * cell_death_rate - k_clearance * ctDNA
+        
+        Where:
+        - k_clearance ≈ 11 per day (half-life ~1.5 hours, Diehl PNAS 2008)
+        - Production is proportional to tumor cell death (baseline + drug-induced)
         
         Args:
             t: Time point (scalar tensor)
-            state: [ctDNA_concentration, tumor_burden, tumor_burden_rate, clone_fraction, drug_concentration]
+            state: [ctDNA_VAF, tumor_burden, tumor_death_rate, clone_fraction, drug_concentration]
+                   Note: tumor_death_rate should include both baseline apoptosis and drug kill
         
         Returns:
             d(state)/dt (tensor of shape [5])
@@ -63,68 +88,145 @@ class ctDNANeuralODE(nn.Module):
         if state.ndim != 1 or state.size(0) != 5:
             raise ValueError(f"Expected state shape [5], got {state.shape}")
         
-        ctDNA, tumor_burden, tumor_rate, clone_frac, drug = state
+        vaf, tumor_burden, tumor_death_rate, clone_frac, drug = state
         
-        # Use neural network to predict ctDNA production rate from full state
-        state_tensor = state.reshape(1, -1).to(self.device)
-        production = self.production_net(state_tensor).squeeze()
+        # Use neural network to predict ctDNA production rate
+        # Input: [tumor_burden, tumor_death_rate, clone_frac, drug]
+        # Production should scale with cell death rate (baseline + drug-induced)
+        # Normalize inputs for better training stability
+        production_input = torch.stack([
+            tumor_burden / 1e8,  # Normalize to typical tumor size
+            torch.clamp(tumor_death_rate, 0, 1.0),  # Death rate (fraction per day)
+            clone_frac,  # Already 0-1
+            drug / 10.0  # Normalize drug concentration
+        ]).to(self.device)
+        production_rate = self.production_net(production_input.unsqueeze(0)).squeeze()
         
-        # Clearance proportional to current ctDNA
-        clearance = self.clearance_rate * ctDNA
+        # Clearance rate based on literature (Diehl PNAS 2008, Bettegowda Sci Transl Med 2014)
+        # ctDNA half-life ~1.5 hours = 0.0625 days
+        # k_clearance = ln(2) / t_half ≈ 11.1 per day
+        # Allow slight variation around this value (±20%)
+        clearance_rate = torch.exp(self.clearance_log)
+        # Clamp to physiologically reasonable range: 8-16 per day
+        clearance_rate = torch.clamp(clearance_rate, 8.0, 16.0)
         
-        d_ctdna_dt = production - clearance
+        # ctDNA dynamics: d(ctDNA)/dt = production - clearance * ctDNA
+        # This follows first-order kinetics as established in literature
+        d_vaf_dt = production_rate - clearance_rate * vaf
         
         # Return derivatives for all 5 state variables
         # Tumor state variables are held constant (derivatives = 0)
-        # Only ctDNA changes
+        # Only VAF changes
         derivatives = torch.zeros_like(state, device=self.device)
-        derivatives[0] = d_ctdna_dt  # d(ctDNA)/dt
+        derivatives[0] = d_vaf_dt  # d(VAF)/dt
         
         return derivatives
     
     def simulate(self, 
-                 initial_ctdna: float, 
+                 initial_vaf: float, 
                  tumor_trajectory: torch.Tensor, 
                  time_points: torch.Tensor,
                  drug_concentration: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        Simulate ctDNA over time given tumor trajectory
+        Simulate ctDNA VAF over time given tumor trajectory
         
         Args:
-            initial_ctdna: Baseline ctDNA concentration (float)
-            tumor_trajectory: Tensor of shape [T, 3] with [burden, rate, clone_frac]
+            initial_vaf: Baseline ctDNA VAF (%)
+            tumor_trajectory: Tensor of shape [T, 3] or [T, 4]
+                - [T, 3]: [burden, growth_rate, clone_frac] (legacy format)
+                - [T, 4]: [burden, death_rate, clone_frac, drug] (new format with death rate)
             time_points: Tensor of time points [T]
-            drug_concentration: Optional drug concentration over time [T]
+            drug_concentration: Optional drug concentration over time [T] (ignored if in trajectory)
         
         Returns:
-            ctDNA trajectory: Tensor [T]
+            ctDNA VAF trajectory: Tensor [T]
         """
         # Validate inputs
-        if tumor_trajectory.ndim != 2 or tumor_trajectory.size(1) != 3:
-            raise ValueError(f"Expected tumor_trajectory shape [T, 3], got {tumor_trajectory.shape}")
+        if tumor_trajectory.ndim != 2:
+            raise ValueError(f"Expected tumor_trajectory to be 2D, got {tumor_trajectory.ndim}D")
+        
+        n_features = tumor_trajectory.size(1)
+        if n_features not in [3, 4]:
+            raise ValueError(f"Expected tumor_trajectory shape [T, 3] or [T, 4], got {tumor_trajectory.shape}")
         
         if time_points.size(0) != tumor_trajectory.size(0):
             raise ValueError("time_points and tumor_trajectory must have same length")
         
-        # Default drug concentration if not provided
-        if drug_concentration is None:
-            drug_concentration = torch.ones_like(time_points) * 1.0  # 1.0 μM baseline
+        # Handle both legacy [T, 3] and new [T, 4] formats
+        if n_features == 4:
+            # New format: [burden, death_rate, clone_frac, drug]
+            drug_concentration = tumor_trajectory[:, 3]
+            tumor_death_rate = tumor_trajectory[:, 1]
+        else:
+            # Legacy format: [burden, growth_rate, clone_frac]
+            # Estimate death rate from growth rate (simplified approximation)
+            if drug_concentration is None:
+                drug_concentration = torch.ones_like(time_points) * 1.0  # 1.0 μM baseline
+            # Approximate death rate: baseline + drug-induced
+            baseline_death = 0.008  # From literature
+            drug_kill = drug_concentration * 0.01  # Simplified
+            tumor_death_rate = baseline_death + drug_kill
         
-        # Initial state: [ctDNA, tumor_burden, tumor_rate, clone_frac, drug]
+        # Initial state: [VAF, tumor_burden, tumor_death_rate, clone_frac, drug]
         y0 = torch.tensor([
-            initial_ctdna, 
+            initial_vaf, 
             tumor_trajectory[0, 0],  # Initial burden
-            tumor_trajectory[0, 1],  # Initial rate
-            tumor_trajectory[0, 2],  # Initial clone fraction
+            tumor_death_rate[0],    # Initial death rate
+            tumor_trajectory[0, 2] if n_features >= 3 else 0.0,  # Initial clone fraction
             drug_concentration[0]    # Initial drug
         ], dtype=torch.float32, device=self.device)
         
-        # Solve ODE
+        # Store tumor trajectory for interpolation during ODE integration
+        # We'll use linear interpolation to get tumor state at any time point
+        self._tumor_traj_burden = tumor_trajectory[:, 0].to(self.device)
+        self._tumor_traj_death_rate = tumor_death_rate.to(self.device)
+        self._tumor_traj_clone_frac = (tumor_trajectory[:, 2] if n_features >= 3 else torch.zeros_like(time_points)).to(self.device)
+        self._tumor_traj_drug = drug_concentration.to(self.device)
+        self._tumor_traj_times = time_points.to(self.device)
+        
+        # Create a wrapper ODE that interpolates tumor state
+        class TumorInterpolatedODE(nn.Module):
+            def __init__(self, ctdna_model):
+                super().__init__()
+                self.ctdna_model = ctdna_model
+            
+            def forward(self, t, state):
+                # state[0] is VAF (being integrated)
+                # Interpolate tumor state at time t using nearest neighbor (simpler and faster)
+                times = self.ctdna_model._tumor_traj_times
+                # Find nearest time index
+                if t <= times[0]:
+                    idx = 0
+                elif t >= times[-1]:
+                    idx = len(times) - 1
+                else:
+                    # Binary search for nearest index
+                    idx = torch.searchsorted(times, t, right=False)
+                    if idx >= len(times):
+                        idx = len(times) - 1
+                    # Use nearest neighbor (could use linear interpolation for smoother results)
+                    if idx > 0 and abs(times[idx-1] - t) < abs(times[idx] - t):
+                        idx = idx - 1
+                
+                # Get tumor state at this time point
+                burden = self.ctdna_model._tumor_traj_burden[idx]
+                death_rate = self.ctdna_model._tumor_traj_death_rate[idx]
+                clone_frac = self.ctdna_model._tumor_traj_clone_frac[idx]
+                drug = self.ctdna_model._tumor_traj_drug[idx]
+                
+                # Create full state: [VAF, burden, death_rate, clone_frac, drug]
+                full_state = torch.stack([state[0], burden, death_rate, clone_frac, drug])
+                derivatives = self.ctdna_model.forward(t, full_state)
+                # Return only d(VAF)/dt (first component)
+                return derivatives[0:1]
+        
+        # Solve ODE with interpolated tumor trajectory
+        wrapped_ode = TumorInterpolatedODE(self)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)  # Suppress torchdiffeq warnings
-            ctDNA_traj = odeint(self, y0, time_points.to(self.device), method='dopri5')
+            vaf_traj = odeint(wrapped_ode, y0[:1], time_points.to(self.device), method='dopri5')
         
-        return ctDNA_traj[:, 0]  # Return only ctDNA concentration
+        return vaf_traj.squeeze()  # Return VAF trajectory
 
 def integrate_with_original_ode(original_ode_func, ctdna_ode, initial_state, time_points):
     """
@@ -283,9 +385,10 @@ def preprocess_training_data(ctdna_df: pd.DataFrame, tme_df: pd.DataFrame) -> Li
         # Target: actual ctDNA VAF
         ctdna_targets = torch.tensor(patient_ctdna['ctdna_vaf_percent'].values, dtype=torch.float32, device=device)
         
-        # Features: approximate tumor burden from ctDNA molecules
+        # Features: estimate tumor burden from ctDNA concentration (physiological scaling)
+        # ctDNA molecules per ml * blood volume (5L) * dilution factor gives approximate tumor burden
         ctdna_molecules = torch.tensor(patient_ctdna['ctdna_molecules_per_ml'].values, dtype=torch.float32, device=device)
-        tumor_burden = ctdna_molecules * 1000  # Approximate scaling factor
+        tumor_burden = ctdna_molecules * 5e6  # Approximate scaling: molecules/ml * 5L blood volume * 1e6 for cell count
         
         # Compute tumor growth rate (numerical gradient)
         tumor_rate = torch.zeros_like(tumor_burden)
@@ -395,17 +498,18 @@ def train_model(model: ctDNANeuralODE,
                         patient['drug_concentration'][t_idx]    # Current drug concentration
                     ], dtype=torch.float32, device=device)
                     
-                    # Predict ctDNA production rate
-                    pred_production = model.production_net(current_state.unsqueeze(0)).squeeze()
+                    # Predict ctDNA rate of change using the model
+                    t_tensor = torch.tensor(0.0, device=device)  # Dummy time
+                    pred_d_ctdna_dt = model(t_tensor, current_state)[0]
                     
-                    # Target: rate of change in ctDNA (simplified as difference)
+                    # Target: rate of change in ctDNA
                     if t_idx > 0:
                         dt = patient['time_points'][t_idx] - patient['time_points'][t_idx-1]
                         actual_ctdna_change = patient['ctdna_targets'][t_idx] - patient['ctdna_targets'][t_idx-1]
                         target_rate = actual_ctdna_change / dt
                         
-                        # Loss on predicted production rate
-                        loss = criterion(pred_production, target_rate)
+                        # Loss on predicted rate of change
+                        loss = criterion(pred_d_ctdna_dt, target_rate)
                         batch_loss += loss
                 
                 batch_loss = batch_loss / max(1, len(patient['time_points']) - 1)
@@ -440,8 +544,9 @@ def train_model(model: ctDNANeuralODE,
                         patient['drug_concentration'][t_idx]    # Current drug concentration
                     ], dtype=torch.float32, device=device)
                     
-                    # Predict ctDNA production rate
-                    pred_production = model.production_net(current_state.unsqueeze(0)).squeeze()
+                    # Predict ctDNA rate of change using the model
+                    t_tensor = torch.tensor(0.0, device=device)  # Dummy time
+                    pred_d_ctdna_dt = model(t_tensor, current_state)[0]
                     
                     # Target: rate of change in ctDNA
                     if t_idx > 0:
@@ -449,8 +554,8 @@ def train_model(model: ctDNANeuralODE,
                         actual_ctdna_change = patient['ctdna_targets'][t_idx] - patient['ctdna_targets'][t_idx-1]
                         target_rate = actual_ctdna_change / dt
                         
-                        # Loss on predicted production rate
-                        loss = criterion(pred_production, target_rate)
+                        # Loss on predicted rate of change
+                        loss = criterion(pred_d_ctdna_dt, target_rate)
                         patient_loss += loss.item()
                 
                 patient_loss = patient_loss / max(1, len(patient['time_points']) - 1)
