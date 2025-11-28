@@ -541,8 +541,6 @@ def display_user_guide():
     - **Pathologic Stage**: Cancer progression stage (IIA-IIIB)
     - **Histology**: tumour type (adenocarcinoma vs squamous)
     - **Residual tumour Burden**: Cancer cells remaining after surgery (100-10,000 cells)
-    - **Histology**: tumour type (adenocarcinoma vs squamous)
-    - **Residual tumour Burden**: Cancer cells remaining after surgery (100-10,000 cells)
 
     #### **Molecular Markers**
     - **ABC Transporter Expression**: Drug efflux pump activity (0.0-3.0)
@@ -588,7 +586,6 @@ def display_user_guide():
 
     This simulator uses **modeling** combining:
     - **Ordinary Differential Equations (ODEs)** for tumour growth
-    - **Ordinary Differential Equations (ODEs)** for tumour growth
     - **Neural Networks** for parameter inference from biomarkers
     - **Graph Neural Networks** for resistance mechanism classification
     - **Neural ODEs** for ctDNA dynamics prediction
@@ -606,13 +603,10 @@ def display_parameter_reference():
     #### **Pathologic Stage (IIA, IIB, IIIA, IIIB)**
     - **What it is**: How advanced the cancer is based on tumour size, lymph node involvement, and metastasis
     - **Impact**: Higher stages have more aggressive tumour biology and higher recurrence risk
-    - **What it is**: How advanced the cancer is based on tumour size, lymph node involvement, and metastasis
-    - **Impact**: Higher stages have more aggressive tumour biology and higher recurrence risk
     - **Default**: IIIA (common stage for adjuvant therapy)
     - **Clinical relevance**: Stage IIIA patients often receive adjuvant chemotherapy
 
     #### **Histology (Adenocarcinoma vs Squamous)**
-    - **What it is**: The microscopic appearance and cell type of the tumour
     - **What it is**: The microscopic appearance and cell type of the tumour
     - **Impact**: Adenocarcinoma tends to be more responsive to pemetrexed, squamous to taxanes
     - **Default**: Adenocarcinoma (most common NSCLC type)
@@ -646,11 +640,9 @@ def display_parameter_reference():
 
     #### **Phenotypic Plasticity Rate (μ) - 0.01 to 0.5**
     - **What it is**: Speed at which tumour cells can switch between drug-sensitive and drug-resistant states
-    - **What it is**: Speed at which tumour cells can switch between drug-sensitive and drug-resistant states
     - **Biological mechanism**: Epigenetic changes allow cells to adapt to therapy pressure
     - **Impact**: Higher μ → faster resistance evolution → earlier recurrence
     - **Default**: 0.12 (moderate plasticity)
-    - **Clinical relevance**: High plasticity explains why some tumours recur despite good initial response
     - **Clinical relevance**: High plasticity explains why some tumours recur despite good initial response
 
     #### **Baseline Epigenetic Instability (σ²) - 0.1 to 2.0**
@@ -658,7 +650,6 @@ def display_parameter_reference():
     - **Biological mechanism**: Stochastic epigenetic changes create cellular heterogeneity
     - **Impact**: Higher σ² → more diverse cell populations → broader resistance mechanisms
     - **Default**: 0.5 (moderate instability)
-    - **Clinical relevance**: Epigenetic heterogeneity drives tumour evolution and treatment failure
     - **Clinical relevance**: Epigenetic heterogeneity drives tumour evolution and treatment failure
 
     ### **💊 Treatment Protocol**
@@ -673,12 +664,10 @@ def display_parameter_reference():
     #### **Relative Dose Intensity (50-150%)**
     - **What it is**: Percentage of planned chemotherapy dose actually delivered
     - **Impact**: Lower intensity (<80%) allows tumour regrowth, higher intensity (>120%) increases toxicity
-    - **Impact**: Lower intensity (<80%) allows tumour regrowth, higher intensity (>120%) increases toxicity
     - **Default**: 100% (full planned dose)
     - **Clinical relevance**: Dose reductions due to toxicity are common and impact outcomes
 
     #### **Simulation Duration (6-48 months)**
-    - **What it is**: How long the model simulates tumour growth and treatment
     - **What it is**: How long the model simulates tumour growth and treatment
     - **Impact**: Longer simulations show resistance evolution and late recurrences
     - **Default**: 24 months (typical follow-up period)
@@ -703,15 +692,11 @@ def display_parameter_reference():
 
     #### **ctDNA Prediction**
     - **Method**: Neural ODE modeling tumour burden → ctDNA shedding
-    - **Method**: Neural ODE modeling tumour burden → ctDNA shedding
     - **Output**: Predicted ctDNA VAF over time with uncertainty bounds
     - **Clinical utility**: Early detection of recurrence before imaging
 
     ### **📊 Understanding Output Plots**
 
-    #### **tumour Dynamics Plot**
-    - **Sensitive Cells**: Drug-responsive tumour cells (blue line)
-    - **Resistant Cells**: Drug-resistant tumour cells (red line)
     #### **tumour Dynamics Plot**
     - **Sensitive Cells**: Drug-responsive tumour cells (blue line)
     - **Resistant Cells**: Drug-resistant tumour cells (red line)
@@ -727,16 +712,13 @@ def display_parameter_reference():
     - **Drug Concentration**: Chemotherapy levels over time
     - **ABC Expression**: Adaptive upregulation of efflux pumps
     - Shows how tumours develop resistance through increased drug export
-    - Shows how tumours develop resistance through increased drug export
 
     #### **Resistance Fraction**
-    - Percentage of tumour cells that are drug-resistant
     - Percentage of tumour cells that are drug-resistant
     - Starts low, increases as sensitive cells are killed
     - Key metric for treatment effectiveness
 
     #### **ctDNA Prediction**
-    - Predicted circulating tumour DNA levels
     - Predicted circulating tumour DNA levels
     - Early warning signal for recurrence
     - Uncertainty bounds show prediction confidence
@@ -746,7 +728,6 @@ def display_parameter_reference():
 # MAIN UI LOGIC
 # ============================================================================
 def main():
-    st.title("🔬 NSCLC tumour Resistance & Recurrence Predictor")
     st.title("🔬 NSCLC tumour Resistance & Recurrence Predictor")
     st.markdown("""**Mechanistic modeling + Machine Learning for patient-specific resistance prediction**  
                 The goal is to act as an early detection system for drug resistance and clinical recurrence in NSCLC patients undergoing chemotherapy or targeted therapy.
