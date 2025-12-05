@@ -21,12 +21,6 @@ This document lists all peer-reviewed literature and clinical trials that inform
    - DOI: [10.1038/s41598-017-00791-8](https://doi.org/10.1038/s41598-017-00791-8)
    - Phenotypic switching dynamics in NSCLC
    - Collateral sensitivity patterns
-
-2. **Huang S, Ernberg I, Bhowmick NA, et al.** Phenotype transitions and tumor heterogeneity. *Seminars in Cancer Biology* 2013;23(4):293-300.
-   - DOI: [10.1016/j.semcancer.2013.04.003](https://doi.org/10.1016/j.semcancer.2013.04.003)
-   - Epigenetic state transitions under drug pressure
-   - Mathematical modeling of plasticity
-
 ---
 
 ## 2. Clinical Outcomes & Survival Benchmarks
@@ -83,8 +77,8 @@ Where:
 **Key References:**
 
 6. **Diehl F, Schmidt K, Choti MA, et al.** Circulating mutant DNA to assess tumor dynamics. *Proceedings of the National Academy of Sciences* 2008;105(36):13118-13123.
-   - DOI: [10.1073/pnas.0804971105](https://doi.org/10.1073/pnas.0804971105)
-   - PMID: 18723680
+   - DOI: [10.1038/nm.1789](https://doi.org/10.1038/nm.1789)
+   - PMID: 18670422
    - First measurement of ctDNA half-life (~2 hours)
    - Foundation for ctDNA kinetics modeling
 
