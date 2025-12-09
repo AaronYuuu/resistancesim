@@ -949,17 +949,63 @@ def display_parameter_reference():
 # MAIN UI LOGIC
 # ============================================================================
 def main():
-    st.title("🔬 NSCLC Digital Twin")
-    st.markdown("### Predictive Modelling of Tumour Recurrence and Drug Resistance")
+    st.set_page_config(
+        page_title="NSCLC Digital Twin",
+        page_icon="🫁",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
     
-    # Clinical Overview
+    # Custom CSS for academic styling
     st.markdown("""
-    <div style="background: transparent; padding: 1.5rem; border-radius: 10px; margin-bottom: 1rem; border: 2px solid #4CAF50;">
-    <h4 style="margin-top: 0; color: #4CAF50;">🎯 Clinical Objective</h4>
-    <p style="margin-bottom: 0.5rem;">
-    <strong>Enable earlier detection of treatment resistance</strong> by predicting tumour recurrence trajectories from routinely collected biomarkers. 
-    This provides clinicians with actionable lead time for therapeutic intervention, potentially months before imaging-detectable relapse. This means more time to plan potentially more effective biological treatments or holistic perspectives. 
-    </p>
+    <style>
+    .main .block-container {
+        padding-top: 2rem;
+        max-width: 1400px;
+    }
+    h1 {
+        font-family: 'Georgia', serif;
+        font-weight: 600;
+        color: #1a1a1a;
+        border-bottom: 3px solid #2c5aa0;
+        padding-bottom: 0.5rem;
+    }
+    h2 {
+        font-family: 'Georgia', serif;
+        color: #2c5aa0;
+        margin-top: 1.5rem;
+    }
+    .stButton>button {
+        background-color: #2c5aa0;
+        color: white;
+        font-weight: 600;
+        border-radius: 4px;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 1.8rem;
+        font-weight: 600;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Academic header
+    st.markdown("""
+    <div style='margin-bottom: 2rem;'>
+        <h1 style='margin-bottom: 0.25rem;'>NSCLC Digital Twin Platform</h1>
+        <p style='font-size: 1.1rem; color: #555; margin-top: 0;'>
+            Mechanistic-Machine Learning Framework for Drug Resistance Prediction
+        </p>
+        <p style='font-size: 0.9rem; color: #777; font-style: italic; margin-top: 0.5rem;'>
+            Research tool for predictive modeling of tumor recurrence in resected non-small cell lung cancer
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Research disclaimer banner
+    st.markdown("""
+    <div style='background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 0.75rem 1rem; margin-bottom: 1.5rem;'>
+        <strong>⚠️ Research Use Only</strong> — This tool has not undergone clinical validation and is intended solely for research and educational purposes. 
+        Not approved for clinical decision-making.
     </div>
     """, unsafe_allow_html=True)
     
@@ -1083,21 +1129,7 @@ def main():
     # Literature
     with st.expander("📚 **Scientific References**", expanded=False):
         st.markdown("""
-        This model is calibrated against peer-reviewed literature. Key references:
-        
-        **Clinical Benchmarks:**
-        - Pignon et al. (2008) *JCO* - LACE meta-analysis: Stage III DFS 18-24 months
-        - Ramalingam et al. (2020) *NEJM* - FLAURA trial: EGFR+ PFS 18.9 months
-        
-        **ctDNA Kinetics:**
-        - Diehl et al. (2008) *PNAS* - ctDNA half-life ~1.5 hours
-        - Bettegowda et al. (2014) *Sci Transl Med* - ctDNA detection across stages
-        
-        **Resistance Mechanisms:**
-        - Sharma et al. (2010) *Cell* - Drug-tolerant persister cells
-        - Hata et al. (2016) *Nature Medicine* - Resistance mutation kinetics
-        
-        Full citations with DOIs available in [REFERENCES.md](https://github.com/[username]/resistancesim/blob/main/REFERENCES.md)
+        Full list of citations available in [REFERENCES.md](https://github.com/AaronYuuu/resistancesim/blob/main/REFERENCES.md)
         """)
     
     st.markdown("---")
@@ -1215,14 +1247,20 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
-        st.sidebar.header("🏥 Patient Configuration")
+        st.sidebar.markdown("""
+        <div style='background-color: #f8f9fa; border-left: 3px solid #2c5aa0; padding: 0.75rem; margin-bottom: 1.5rem;'>
+            <strong style='color: #2c5aa0;'>Method:</strong> ML-Assisted Prediction<br/>
+            <small style='color: #666;'>Automated parameter inference from biomarker panel</small>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Clinical staging parameters
-        st.sidebar.subheader("Clinical Staging")
+        st.sidebar.markdown("### 1. Clinical Characteristics")
         params['stage'] = st.sidebar.selectbox("Pathologic Stage", ["IIA", "IIB", "IIIA", "IIIB"], index=2)
         params['histology'] = st.sidebar.selectbox("Histology", ["adenocarcinoma", "squamous"])
         
-        st.sidebar.subheader("Biomarker Sliders")
+        st.sidebar.markdown("### 2. Biomarker Panel")
+        st.sidebar.markdown("<small style='color: #666;'>Baseline circulating markers</small>", unsafe_allow_html=True)
         
         # Sliders for key biomarkers used in ML models
         # Ranges calibrated to clinical values and risk scoring
@@ -1328,6 +1366,9 @@ def main():
             - **Very high MDSC (>50/mL)**
             - Severe immune suppression
             """)
+        
+        # Treatment section header
+        st.sidebar.markdown("### 3. Treatment Protocol")
         
         # Define param_inference_features for ML parameter inference
         param_inference_features = {
@@ -1473,9 +1514,16 @@ def main():
         st.stop()
     
     # Advanced mode and run button
-    advanced_mode = st.sidebar.checkbox("Advanced Mode", value=False)
     st.sidebar.markdown("---")
-    run_button = st.sidebar.button("▶️ RUN SIMULATION", type="primary")
+    advanced_mode = st.sidebar.checkbox("Show Advanced Diagnostics", value=False, help="Display ML internals and solver information")
+    
+    st.sidebar.markdown("<br/>", unsafe_allow_html=True)
+    run_button = st.sidebar.button(
+        "▶️ Execute Simulation",
+        type="primary",
+        help="Run mechanistic ODE model with ML-enhanced parameters",
+        use_container_width=True
+    )
     
     # Execution and visualization
     if run_button or 'results' in st.session_state:
@@ -1489,23 +1537,36 @@ def main():
             st.error(f"⚠️ Solver failed: {results.solver_message}")
             st.stop()
         
+        # Results header section
+        st.markdown("## Simulation Results")
+        st.markdown("<hr style='margin: 0.5rem 0 1.5rem 0; border: none; border-top: 2px solid #dee2e6;'/>", unsafe_allow_html=True)
+        
         if params['ml_inference'] and results.ml_inferred_params:
-            patient_label = params['patient_id'] if params['patient_id'] else "Custom Patient"
-            st.success(f"✅ ML-Enhanced Simulation (Patient: {patient_label})")
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
+            patient_label = params['patient_id'] if params['patient_id'] else "Custom Configuration"
             with col1: 
+                st.metric("Patient ID", patient_label)
+            with col2:
                 conf = results.resistance_prediction['confidence'] if results.resistance_prediction else 0
-                st.metric("Classifier Confidence", f"{conf:.1%}" if results.resistance_prediction else "N/A")
-            with col2: 
+                st.metric("Model Confidence", f"{conf:.1%}" if results.resistance_prediction else "N/A")
+            with col3:
                 resistance_type = results.resistance_prediction['predicted_mechanism'] if results.resistance_prediction else "N/A"
-                st.metric("Resistance Type", resistance_type)
-            with col3: st.metric("ctDNA Prediction", "Enabled" if results.ctdna_vaf is not None else "Disabled")
+                st.metric("Predicted Mechanism", resistance_type)
+            with col4:
+                st.metric("Neural ODE ctDNA", "Active" if results.ctdna_vaf is not None else "Inactive")
         
         display_recurrence_prediction(results.recurrence_time if results.recurrence_detected else params['simulation_days']/30, results.recurrence_detected)
         st.markdown("---")
         
+        st.markdown("<br/>", unsafe_allow_html=True)
+        st.markdown("### Detailed Analysis")
+        
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "📊 Tumour & ctDNA Dynamics", "🧬 Epigenetic Evolution", "💊 Drug & ABC Kinetics", "📈 Resistance Fraction", "🔬 ctDNA Prediction"
+            "📊 Population Dynamics",
+            "🧬 Epigenetic State",
+            "💊 Pharmacokinetics",
+            "📈 Resistance Evolution",
+            "🔬 ctDNA Trajectory"
         ])
         
         with tab1:
@@ -1558,10 +1619,31 @@ def main():
                 if results.ml_inferred_params: st.write(f"**ML Parameters:** {results.ml_inferred_params}")
     
     else:
-        st.info("👈 Configure patient parameters and click **RUN SIMULATION**")
+        # Welcome screen when no simulation has been run
+        st.markdown("""
+        <div style='background-color: #f8f9fa; border-radius: 8px; padding: 2rem; margin: 2rem 0;'>
+            <h3 style='margin-top: 0; color: #2c5aa0;'>Getting Started</h3>
+            <p style='font-size: 1rem; line-height: 1.6;'>
+                Configure patient parameters in the <strong>Configuration Panel</strong> (left sidebar), 
+                then click <strong>Execute Simulation</strong> to generate predictions.
+            </p>
+            <p style='font-size: 0.9rem; color: #666; margin-bottom: 0;'>
+                The platform uses a hybrid mechanistic-machine learning approach combining:
+            </p>
+            <ul style='font-size: 0.9rem; color: #666;'>
+                <li>Ordinary differential equations for tumor population dynamics</li>
+                <li>Neural networks for biomarker-based parameter inference</li>
+                <li>Graph neural networks for resistance mechanism classification</li>
+                <li>Neural ODEs for ctDNA trajectory prediction</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
         col1, col2 = st.columns(2)
-        with col1: st.metric("ML Data Available", "✅ Yes" if st.session_state.ml_data_available else "❌ No")
-        with col2: st.metric("ML Models Loaded", "✅ Yes" if st.session_state.ml_models_loaded else "❌ No")
+        with col1: 
+            st.metric("ML Training Data", "✅ Available" if st.session_state.ml_data_available else "❌ Not Found")
+        with col2: 
+            st.metric("ML Model Status", "✅ Loaded" if st.session_state.ml_models_loaded else "❌ Not Loaded")
 
 if __name__ == "__main__":
     main()

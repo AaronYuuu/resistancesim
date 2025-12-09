@@ -78,7 +78,7 @@ Where k_clear ≈ 11/day corresponds to the literature-established half-life of 
 
 ---
 
-## Machine Learning Components
+## Machine Learning Background
 
 ### 1. Patient Parameter Neural Network
 
@@ -159,7 +159,7 @@ A composite score (0-1) computed from weighted biomarker contributions:
 
 ```bash
 # Clone repository
-git clone https://github.com/[username]/resistancesim.git
+git clone https://github.com/aaronnyuu/resistancesim.git
 cd resistancesim
 
 # Create virtual environment
@@ -216,18 +216,6 @@ Click "Run Simulation" to execute the ODE solver. The system will:
 
 ---
 
-## Clinical Validation Status
-
-### Calibration Benchmarks
-
-Model parameters are calibrated against published clinical trial data:
-
-| Benchmark | Source | Target | Model Output |
-|-----------|--------|--------|--------------|
-| Stage III DFS | LACE meta-analysis | 18-24 months | ✓ |
-| EGFR+ PFS | FLAURA trial | 18.9 months | ✓ |
-| ctDNA half-life | Diehl et al. | 1.5 hours | ✓ |
-
 ### Limitations
 
 This model incorporates significant simplifications:
@@ -276,28 +264,119 @@ resistancesim/
 
 ---
 
-## References
+## Biochemistry Background Information
 
-Full citations with DOIs are provided in [REFERENCES.md](REFERENCES.md). Key sources include:
+### 1. Tumor Growth & Population Dynamics
 
-1. Pignon JP et al. (2008) LACE meta-analysis. *J Clin Oncol* 26:3552-9. [DOI: 10.1200/JCO.2007.13.9030](https://doi.org/10.1200/JCO.2007.13.9030)
-2. Diehl F et al. (2008) ctDNA dynamics. *PNAS* 105:13118-23. [DOI: 10.1073/pnas.0804971105](https://doi.org/10.1073/pnas.0804971105)
-3. Ramalingam SS et al. (2020) FLAURA trial. *NEJM* 382:41-50. [DOI: 10.1056/NEJMoa1913662](https://doi.org/10.1056/NEJMoa1913662)
-4. Sharma SV et al. (2010) Drug-tolerant persisters. *Cell* 141:69-80. [DOI: 10.1016/j.cell.2010.02.027](https://doi.org/10.1016/j.cell.2010.02.027)
+**Phenotypic Plasticity and Resistance Evolution**
+
+| Parameter | Value | Reference |
+|-----------|-------|-----------|
+| MRD doubling time | 20-70 days | [1] |
+| Phenotypic switching rate | μ ~ 0.001-0.05/day | [2] |
+| Epigenetic instability | σ² ~ 0.5, heritability h ~ 0.8 | [3] |
+| Carrying capacity | 5×10⁹ - 10¹¹ cells | Standard assumption |
+
+### 2. Clinical Outcomes & Survival Benchmarks
+
+**Adjuvant Chemotherapy Trials**
+
+| Trial | Population | Outcome | Reference |
+|-------|------------|---------|-----------|
+| LACE meta-analysis | Stage II-III resected NSCLC | Median DFS: 18-24 months | [4] |
+| FLAURA | EGFR+ advanced NSCLC | Median PFS: 18.9 months | [5] |
+| ADAURA | EGFR+ resected NSCLC | DFS: Not reached at 4 years | [6] |
+
+### 3. Circulating Tumor DNA (ctDNA) Kinetics
+
+ctDNA is a key measure for MRD detection [7]. The ctDNA dynamics follow a production-clearance ODE where k_clearance = ln(2) / t½ ≈ 11/day (for t½ = 1.5 hours), and k_production is calibrated to clinical VAF ranges.
+
+| Parameter | Value | Reference |
+|-----------|-------|-----------|
+| ctDNA half-life | 1.5 hours | [8] |
+| Clearance rate | k = 11/day | Derived from half-life |
+| Production ∝ cell death | Linear relationship | [9] |
+| Clinical VAF range | 0.01% - 50% | [9] |
+
+### 4. EGFR-TKI Resistance Mechanisms
+
+**Osimertinib Resistance ODE System**
+
+The model includes four cell populations [10]:
+- **S_EGFR**: Sensitive EGFR-mutant cells
+- **R_T790M**: T790M-positive (osimertinib-responsive) [11]
+- **R_C797S**: C797S-positive (osimertinib-resistant)
+- **DTP**: Drug-tolerant persister cells
+
+| Mechanism | Parameter | Reference |
+|-----------|-----------|-----------|
+| Resistance mutation rate | 10⁻⁷ per division | [12] |
+| C797S emergence | Tertiary mutation | [13] |
+| T790M kinetics | Pre-existing + acquired | [11] |
+| MET amplification | Bypass pathway | [14] |
+| Drug-tolerant persisters | Reversible quiescence | [15] |
+
+### 5. Osimertinib Pharmacokinetics
+
+| Parameter | Value | Reference |
+|-----------|-------|-----------|
+| Half-life | 48 hours | [16] |
+| Steady-state Cmax | ~500 nM | [5] |
+| Steady-state Cmin | ~300 nM | [5] |
+| EC50 (EGFR-mutant, in vivo) | 300-400 nM | [17] |
+| EC50 (C797S) | ~3000 nM | [13] |
+
+### 6. Carboplatin Pharmacokinetics
+
+**PK Model**: One-compartment model with first-order elimination: C(t) = C₀ × exp(-k × t)
+
+| Parameter | Value | Reference |
+|-----------|-------|-----------|
+| Half-life | 4 hours | [18] |
+| Volume of distribution | 1.5 L/kg | Standard PK |
+| Clearance rate | 0.173/hour | Derived from half-life |
+
+### 7. ABC Transporter Dynamics
+
+**Efflux Pump Model**: Michaelis-Menten kinetics for drug efflux: Efflux = (Vmax × ABC × D_intra) / (Km + D_intra)
+
+| Parameter | Value | Reference |
+|-----------|-------|-----------|
+| Km (carboplatin) | 2.3 μM | [19] |
+| Vmax (ABCC1) | 1.5 μM/day | Estimated |
+| Drug-induced upregulation | 10%/cycle | [20] |
+
+### 8. Tumor Microenvironment & Biomarkers
+
+**GNN Classifier Features**: The Graph Neural Network uses TME cell interactions:
+
+| Biomarker | Prognostic Role | Reference |
+|-----------|-----------------|-----------|
+| HGF | MET pathway activation | [14] |
+| IL-6 | Pro-inflammatory, poor prognosis | - |
+| IL-10 | Immunosuppression | - |
+| TGF-β | EMT, fibrosis | - |
+| MDSCs | Immune evasion | - |
+| VEGF | Angiogenesis | - |
+| ctDNA VAF | Tumor burden | [9] |
+
+### Summary of Key Equations
+
+**Phenotypic Switching** [2,3]:
+```
+μ_S→R = μ × σ × S × (1 + 0.5 × D_intra / (EC50 + D_intra))
+```
+
+**ctDNA Clearance** [8]:
+```
+Where k_clear ≈ 11/day
+```
 
 ---
 
-## Citation
+## References
 
-```bibtex
-@software{nsclc_digital_twin_2025,
-  title={NSCLC Digital Twin: Predictive Modelling of Tumour Recurrence and Drug Resistance},
-  author={[Authors]},
-  year={2025},
-  url={https://github.com/[username]/resistancesim},
-  note={Research software - not validated for clinical use}
-}
-```
+Full citations with DOIs are provided in [REFERENCES.md](REFERENCES.md)
 
 ---
 
@@ -310,5 +389,5 @@ MIT License. See [LICENSE](LICENSE) for details.
 ---
 
 **Version**: 2.0.0  
-**Last Updated**: November 2025  
+**Last Updated**: December 2025  
 **Status**: Research Tool
